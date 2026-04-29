@@ -1,0 +1,19 @@
+# secrets
+.env
+*.secret.json
+
+# logs
+*.log
+
+# temp files
+*.bak
+~$*
+
+# dependencies
+node_modules/
+
+# python
+__pycache__/
+
+# expo
+.expo/

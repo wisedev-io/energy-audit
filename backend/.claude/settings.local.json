@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(npx tsc *)",
+      "Bash(pip3 show *)",
+      "Bash(curl -s http://157.180.28.98:5050/healthz)",
+      "Bash(ssh root@157.180.28.98 \"curl -s http://localhost:5050/upload_photo 2>&1; echo '---'; pip3 show pytesseract 2>&1 | head -3; which tesseract 2>&1; ls /opt/energy-audit/server.py 2>&1\")",
+      "Bash(ssh energy-audit-server *)",
+      "Bash(xargs ls *)",
+      "Bash(bash deploy.sh)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s http://157.180.28.98:5050/)",
+      "Bash(curl -s http://157.180.28.98:5050/cases)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Cases: {len\\(d\\)} total'\\); [print\\(f'  - {c[\\\\\"name\\\\\"]} \\({c.get\\(\\\\\"owner\\\\\",\\\\\"?\\\\\"\\)}\\)'\\) for c in d[:5]]\")",
+      "Bash(curl -s -X POST http://157.180.28.98:5050/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"Kamoliddin\",\"password\":\"abulika8\"}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Login:', d.get\\('success'\\)\\); t=d.get\\('token',''\\); print\\('Token:', t[:16]+'...' if t else 'none'\\); print\\('User:', d.get\\('user',{}\\).get\\('username'\\), '/', d.get\\('user',{}\\).get\\('role'\\)\\)\")",
+      "Bash(curl -s --connect-timeout 5 http://157.180.28.98:5050/health)",
+      "Bash(curl -s --connect-timeout 5 http://157.180.28.98:5050/healthz)",
+      "Bash(git -C /Users/kamoliddinrasulov/energy-audit-backend diff generate.py)",
+      "Bash(git -C /Users/kamoliddinrasulov/energy-audit-backend diff server.py storage.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X OPTIONS http://157.180.28.98:5050/generate -H \"Origin: http://localhost:8081\" -H \"Access-Control-Request-Method: POST\")",
+      "Bash(bash /Users/kamoliddinrasulov/energy-audit-backend/deploy.sh)",
+      "Bash(curl -s http://localhost:5050/cases)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([c['name'] for c in d[:3]]\\)\")",
+      "Bash(python3 -c \"import generate; print\\('generate.py imports OK'\\)\")"
+    ]
+  }
+}

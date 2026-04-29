@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(echo \"Started with PID $!\")",
+      "Bash(kill 14640)",
+      "Bash(xargs ls *)"
+    ]
+  }
+}

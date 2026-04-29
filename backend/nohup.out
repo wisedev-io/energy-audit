@@ -1,0 +1,94 @@
+
+==================================================
+  Energy Audit server running.
+  Open: http://0.0.0.0:5050
+==================================================
+
+ * Serving Flask app 'server'
+ * Debug mode: off
+Address already in use
+Port 5050 is in use by another program. Either identify and stop that program, or start the server with a different port.
+
+==================================================
+  Energy Audit server running.
+  Open: http://0.0.0.0:5050
+==================================================
+
+ * Serving Flask app 'server'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5050
+ * Running on http://157.180.28.98:5050
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [21/Apr/2026 08:11:19] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:19] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+127.0.0.1 - - [21/Apr/2026 08:11:22] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:32] "DELETE /cases/EA-2600007_RASULJONOV HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:33] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:48] "DELETE /cases/EA-2600001_TESTOV HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:49] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:55] "DELETE /cases/EA-2600002_TESTOV HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:11:56] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:01] "DELETE /cases/EA-2600003_ASXSC_CVCCVC HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:02] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:08] "DELETE /cases/EA-2600004_MAXMUDOV HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:09] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:17] "GET /cases/EA-2600006_RASULJONOV/form HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:22] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:12:24] "GET /cases/EA-2600005_RASULJONOV/form HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:12:58] "GET / HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:13:01] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:13:02] "GET /cases/EA-2600006_RASULJONOV/form HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:13:10] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:13:14] "GET /cases/EA-2600006_RASULJONOV/EA-2600006_RASULJONOV.docx HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:13:17] "GET /cases/EA-2600005_RASULJONOV/EA-2600005_RASULJONOV.docx HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:34:54] "POST /generate HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:34:58] "GET /cases/EA-2600005_RASULJONOV/EA-2600005_RASULJONOV.docx HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:35:00] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:45:43] "GET /cases HTTP/1.1" 200 -
+127.0.0.1 - - [21/Apr/2026 08:50:45] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:51:34] "GET / HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:51:34] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+144.124.192.223 - - [21/Apr/2026 08:51:37] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 08:51:43] "GET /cases/EA-2600005_RASULJONOV/EA-2600005_RASULJONOV.docx HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:29:53] "[36mGET / HTTP/1.1[0m" 304 -
+144.124.192.223 - - [21/Apr/2026 09:29:55] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:29:56] "GET /cases/EA-2600005_RASULJONOV/form HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:31:01] "POST /generate HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:31:05] "GET /cases/EA-2600005_RASULJONOV/EA-2600005_RASULJONOV.docx HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:31:06] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:56:56] "GET /cases/EA-2600005_RASULJONOV/form HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "/opt/energy-audit/server.py", line 98, in generate
+    result = generate_all(form_data, uploaded_photos, edit_case_name=edit_case)
+  File "/opt/energy-audit/generate.py", line 1102, in generate_all
+    chart_paths = generate_charts(energy, tmp_dir)
+  File "/opt/energy-audit/generate.py", line 964, in generate_word_report
+    _fill_u_table(doc, variables, form_data or {})
+  File "/opt/energy-audit/generate.py", line 561, in _insert_all_photos
+    key=lambda item: (item[0], item[1]),
+  File "/opt/energy-audit/generate.py", line 482, in _fill_photo_table_section
+    caption_tr = table.rows[caption_row_idx]._tr
+  File "/opt/energy-audit/.venv/lib/python3.10/site-packages/docx/table.py", line 526, in __getitem__
+    return list(self)[idx]
+IndexError: list index out of range
+144.124.192.223 - - [21/Apr/2026 09:57:11] "[35m[1mPOST /generate HTTP/1.1[0m" 500 -
+144.124.192.223 - - [21/Apr/2026 09:57:29] "[36mGET / HTTP/1.1[0m" 304 -
+144.124.192.223 - - [21/Apr/2026 09:57:31] "GET /cases HTTP/1.1" 200 -
+144.124.192.223 - - [21/Apr/2026 09:57:32] "GET /cases/EA-2600005_RASULJONOV/form HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "/opt/energy-audit/server.py", line 98, in generate
+    result = generate_all(form_data, uploaded_photos, edit_case_name=edit_case)
+  File "/opt/energy-audit/generate.py", line 1102, in generate_all
+    chart_paths = generate_charts(energy, tmp_dir)
+  File "/opt/energy-audit/generate.py", line 964, in generate_word_report
+    _fill_u_table(doc, variables, form_data or {})
+  File "/opt/energy-audit/generate.py", line 561, in _insert_all_photos
+    key=lambda item: (item[0], item[1]),
+  File "/opt/energy-audit/generate.py", line 482, in _fill_photo_table_section
+    caption_tr = table.rows[caption_row_idx]._tr
+  File "/opt/energy-audit/.venv/lib/python3.10/site-packages/docx/table.py", line 526, in __getitem__
+    return list(self)[idx]
+IndexError: list index out of range
+144.124.192.223 - - [21/Apr/2026 09:57:40] "[35m[1mPOST /generate HTTP/1.1[0m" 500 -
