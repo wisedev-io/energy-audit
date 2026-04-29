@@ -17,3 +17,4 @@ __pycache__/
 
 # expo
 .expo/google-vision-key.json
+google-vision-key.json
