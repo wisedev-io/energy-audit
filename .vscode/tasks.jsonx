@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Expo",
+      "type": "shell",
+      "command": "cd ~/energy-audit/frontend && npx expo start",
+      "presentation": {
+        "panel": "new"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Deploy to Server",
+      "type": "shell",
+      "command": "cd ~/energy-audit && git add . && git commit -m 'deploy' && git push origin main && ssh -i ~/.ssh/energy_audit_server root@157.180.28.98 'cd /opt/energy-audit && git pull origin main && systemctl restart energy-audit'",
+      "presentation": {
+        "panel": "new"
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-const BASE_URL = 'http://157.180.28.98';
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://157.180.28.98:5050';
 
 export const api = {
   // List all cases

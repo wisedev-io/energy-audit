@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Dev",
+      "dependsOn": ["Start Backend", "Start Frontend"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Start Backend",
+      "type": "shell",
+      "command": "cd ~/energy-audit/backend && source .venv/bin/activate && watchmedo auto-restart --patterns='*.py' --recursive -- python3 server.py",
+      "presentation": {
+        "panel": "new"
+      }
+    },
+    {
+      "label": "Start Frontend",
+      "type": "shell",
+      "command": "cd ~/energy-audit/frontend && npx expo start",
+      "presentation": {
+        "panel": "new"
+      }
+    }
+  ]
+}

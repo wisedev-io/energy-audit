@@ -16,4 +16,4 @@ node_modules/
 __pycache__/
 
 # expo
-.expo/
+.expo/google-vision-key.json
