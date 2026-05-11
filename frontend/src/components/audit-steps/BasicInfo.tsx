@@ -20,72 +20,92 @@ function parseCaseNo(editCase: string): string {
 // District / city options keyed by region value
 const REGION_CITIES: Record<string, string[]> = {
   'Toshkent shahri': [
-    'Yunusobod tumani', 'Yakkasaroy tumani', 'Mirobod tumani', 'Shayxontohur tumani',
-    'Olmazor tumani', 'Chilonzor tumani', 'Sergeli tumani', 'Uchtepa tumani',
-    'Yashnobod tumani', 'Bektemir tumani',
+    'Bektemir tumani', 'Chilonzor tumani', 'Mirobod tumani', 'Olmazor tumani',
+    'Sergeli tumani', 'Shayxontohur tumani', 'Uchtepa tumani', 'Yakkasaroy tumani',
+    'Yashnobod tumani', 'Yunusobod tumani',
   ],
   'Toshkent viloyati': [
-    'Toshkent tumani', 'Bekobod', "Bo'ka", 'Chinoz', 'Qibray', 'Ohangaron',
-    "Oqqo'rg'on", 'Zangiota', 'Yuqorichirchiq', 'Quyi Chirchiq', "O'rta Chirchiq",
-    "Bo'stonliq", 'Parkent', 'Piskent', "Uyg'ur", 'Angren', 'Chirchiq', 'Olmaliq',
+    'Angren shahri', 'Bekobod shahri', 'Chirchiq shahri', 'Ohangaron shahri', 'Olmaliq shahri',
+    "Bo'ka tumani", "Bo'stonliq tumani", 'Chinoz tumani', "Oqqo'rg'on tumani", 'Parkent tumani',
+    'Piskent tumani', 'Qibray tumani', 'Toshkent tumani', "Uyg'ur tumani",
+    'Yuqorichirchiq tumani', "O'rta Chirchiq tumani", 'Quyi Chirchiq tumani', 'Zangiota tumani',
   ],
   'Andijon viloyati': [
-    'Andijon shahri', 'Asaka', 'Baliqchi', "Bo'ston", 'Buloqboshi', "Xo'jaobod",
-    'Izboskan', 'Jalaquduq', 'Marhamat', "Oltinko'l", 'Paxtaobod', "Qo'rg'ontepa",
-    'Shahrixon', "Ulug'nor",
+    'Andijon shahri', 'Asaka shahri',
+    'Baliqchi tumani', "Bo'ston tumani", 'Buloqboshi tumani', "Xo'jaobod tumani",
+    'Izboskan tumani', 'Jalaquduq tumani', 'Marhamat tumani', "Oltinko'l tumani",
+    'Paxtaobod tumani', "Qo'rg'ontepa tumani", 'Shahrixon tumani', "Ulug'nor tumani",
   ],
   "Farg'ona viloyati": [
-    "Farg'ona shahri", 'Beshariqi', "Bog'dod", "Dang'ara", 'Furqat', 'Hamza',
-    "Ko'shtepa", "Marg'ilon", "O'zbekiston tumani", "Qo'qon", 'Quva', 'Rishton',
-    "So'x", 'Toshloq', "Uchko'prik", 'Yozyovon',
+    "Farg'ona shahri", "Marg'ilon shahri", "Qo'qon shahri",
+    'Beshariqi tumani', "Bog'dod tumani", "Dang'ara tumani", 'Furqat tumani', 'Hamza tumani',
+    "Ko'shtepa tumani", 'Oltiariq tumani', "O'zbekiston tumani", 'Quva tumani', 'Rishton tumani',
+    "So'x tumani", 'Toshloq tumani', "Uchko'prik tumani", 'Yozyovon tumani',
   ],
   'Namangan viloyati': [
-    'Namangan shahri', 'Chortoq', 'Chust', 'Kosonsoy', 'Mingbuloq', 'Narbuta',
-    'Norin', 'Pop', "To'raqo'rg'on", 'Uychi', "Yangiqo'rg'on",
+    'Namangan shahri',
+    'Chortoq tumani', 'Chust tumani', 'Kosonsoy tumani', 'Mingbuloq tumani',
+    'Narbuta tumani', 'Norin tumani', 'Pop tumani', "To'raqo'rg'on tumani",
+    'Uychi tumani', "Yangiqo'rg'on tumani",
   ],
   'Samarqand viloyati': [
-    'Samarqand shahri', "Bulung'ur", 'Ishtixon', 'Jomboy', "Kattaqo'rg'on",
-    'Narpay', 'Nurobod', 'Oqdaryo', 'Paxtachi', 'Payariq', "Qo'shrabot", 'Urgut',
+    'Samarqand shahri', "Kattaqo'rg'on shahri",
+    "Bulung'ur tumani", 'Ishtixon tumani', 'Jomboy tumani', "Kattaqo'rg'on tumani",
+    'Narpay tumani', 'Nurobod tumani', 'Oqdaryo tumani', 'Paxtachi tumani',
+    'Pastdarg\'om tumani', 'Payariq tumani', "Qo'shrabot tumani", 'Tayloq tumani', 'Urgut tumani',
   ],
   'Buxoro viloyati': [
-    'Buxoro shahri', "G'ijduvon", 'Jondor', 'Kogon', 'Olot', 'Peshku',
-    "Qorako'l", 'Qorovulbozor', 'Romitan', 'Shofirkon', 'Vobkent',
+    'Buxoro shahri', 'Kogon shahri',
+    "G'ijduvon tumani", 'Jondor tumani', 'Kogon tumani', 'Olot tumani', 'Peshku tumani',
+    "Qorako'l tumani", 'Qorovulbozor tumani', 'Romitan tumani', 'Shofirkon tumani', 'Vobkent tumani',
   ],
   'Xorazm viloyati': [
-    'Urganch shahri', "Bog'ot", 'Gurlan', 'Hazorasp', 'Xiva', "Qo'shko'pir",
-    'Shovot', "Tuproqqal'a", 'Urganch tumani', 'Yangibozor', 'Yangiariq',
+    'Urganch shahri', 'Xiva shahri',
+    "Bog'ot tumani", 'Gurlan tumani', 'Hazorasp tumani', "Qo'shko'pir tumani",
+    'Shovot tumani', "Tuproqqal'a tumani", 'Urganch tumani', 'Yangibozor tumani', 'Yangiariq tumani',
   ],
   'Qashqadaryo viloyati': [
-    'Qarshi shahri', 'Chiroqchi', 'Dehqonobod', "G'uzor", 'Kasbi', 'Kitob',
-    "Ko'kdala", 'Mirishkor', 'Muborak', 'Nishon', 'Qamashi', 'Shahrisabz', "Yakkabog'",
+    'Qarshi shahri', 'Shahrisabz shahri',
+    'Chiroqchi tumani', 'Dehqonobod tumani', "G'uzor tumani", 'Kasbi tumani',
+    'Kitob tumani', "Ko'kdala tumani", 'Mirishkor tumani', 'Muborak tumani',
+    'Nishon tumani', 'Qamashi tumani', "Yakkabog' tumani",
   ],
   'Surxondaryo viloyati': [
-    'Termiz shahri', 'Angor', 'Bandixon', 'Boysun', 'Denov', "Jarqo'rg'on",
-    'Muzrabot', 'Oltinsoy', 'Qiziriq', "Qumqo'rg'on", 'Sariosiyo', 'Sherobod',
-    "Sho'rchi", 'Uzun',
+    'Termiz shahri',
+    'Angor tumani', 'Bandixon tumani', 'Boysun tumani', 'Denov tumani',
+    "Jarqo'rg'on tumani", 'Muzrabot tumani', 'Oltinsoy tumani', 'Qiziriq tumani',
+    "Qumqo'rg'on tumani", 'Sariosiyo tumani', 'Sherobod tumani', "Sho'rchi tumani", 'Uzun tumani',
   ],
   'Navoiy viloyati': [
-    'Navoiy shahri', 'Karmana', 'Konimex', 'Navbahor', 'Nurota', 'Qiziltepa',
-    'Tomdi', 'Uchquduq', 'Xatirchi', 'Zarafshon',
+    'Navoiy shahri', 'Zarafshon shahri',
+    'Karmana tumani', 'Konimex tumani', 'Navbahor tumani', 'Nurota tumani',
+    'Qiziltepa tumani', 'Tomdi tumani', 'Uchquduq tumani', 'Xatirchi tumani',
   ],
   'Jizzax viloyati': [
-    'Jizzax shahri', 'Arnasoy', 'Baxmal', "Do'stlik", 'Forish', "G'allaorol",
-    "Mirzacho'l", 'Paxtakor', 'Yangiobod', 'Zarbdor', 'Zomin',
+    'Jizzax shahri',
+    'Arnasoy tumani', 'Baxmal tumani', "Do'stlik tumani", 'Forish tumani',
+    "G'allaorol tumani", "Mirzacho'l tumani", 'Paxtakor tumani', 'Yangiobod tumani',
+    'Zarbdor tumani', 'Zomin tumani',
   ],
   'Sirdaryo viloyati': [
-    'Guliston shahri', 'Boyovut', 'Mirzaobod', 'Oqoltin', 'Sardoba',
-    'Sayxunobod', 'Shirin', 'Xovos',
+    'Guliston shahri', 'Shirin shahri',
+    'Boyovut tumani', 'Mirzaobod tumani', 'Oqoltin tumani', 'Sardoba tumani',
+    'Sayxunobod tumani', 'Sirdaryo tumani', 'Xovos tumani',
   ],
-  "Qoraqalpog'iston": [
-    'Nukus shahri', 'Amudaryo', 'Beruniy', 'Chimboy', 'Ellikkala', 'Kegeyli',
-    "Mo'ynoq", 'Nukus tumani', "Qanliko'l", "Qo'ng'irot", 'Shumanay',
-    "Taxtako'pir", "To'rtko'l", "Xo'jayli",
+  "Qoraqalpog'iston Respublikasi": [
+    'Nukus shahri', "Qo'ng'irot shahri",
+    'Amudaryo tumani', 'Beruniy tumani', "Bo'zatov tumani", 'Chimboy tumani',
+    'Ellikkala tumani', 'Kegeyli tumani', "Mo'ynoq tumani", 'Nukus tumani',
+    "Qanliko'l tumani", "Qo'ng'irot tumani", 'Shumanay tumani',
+    "Taxtako'pir tumani", "To'rtko'l tumani", "Xo'jayli tumani",
   ],
 };
 
+const MANUAL_OPTION = '__manual__';
+
 const RESIDENTS = Array.from({ length: 60 }, (_, i) => String(i + 1));
 
-export default function BasicInfo({ data, updateData }: any) {
+export default function BasicInfo({ data, updateData, embedded }: any) {
   const [formData, setFormData] = useState({
     case_number: data.case_number || parseCaseNo(data.edit_case || ''),
     aud_date: normaliseDate(data.aud_date),
@@ -104,6 +124,12 @@ export default function BasicInfo({ data, updateData }: any) {
     gas_account: data.gas_account || '',
   });
 
+  const [cityManualMode, setCityManualMode] = useState<boolean>(() => {
+    if (!data.city || !data.region) return false;
+    const opts = REGION_CITIES[data.region] || [];
+    return data.city.length > 0 && !opts.includes(data.city);
+  });
+
   const handleChange = (field: string, value: string) => {
     const newData = { ...formData, [field]: value };
     if (field === 'owner') {
@@ -111,6 +137,7 @@ export default function BasicInfo({ data, updateData }: any) {
     }
     if (field === 'region') {
       newData.city = '';
+      setCityManualMode(false);
     }
     setFormData(newData);
     updateData(newData);
@@ -118,8 +145,9 @@ export default function BasicInfo({ data, updateData }: any) {
 
   const cityOptions = formData.region ? (REGION_CITIES[formData.region] || []) : [];
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
       {/* ── Audit Information ───────────────────────────────────────────── */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -127,7 +155,7 @@ export default function BasicInfo({ data, updateData }: any) {
           <Text style={styles.sectionTitle}>Audit Information</Text>
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Case Number (case_number)</Text>
+          <Text style={styles.label}>Case Number</Text>
           <TextInput
             style={styles.input}
             value={formData.case_number}
@@ -155,7 +183,7 @@ export default function BasicInfo({ data, updateData }: any) {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Region (region)</Text>
+          <Text style={styles.label}>Region</Text>
           <View style={styles.pickerContainer}>
             <Picker selectedValue={formData.region} onValueChange={(v) => handleChange('region', v)}>
               <Picker.Item label="Select Region" value="" />
@@ -172,20 +200,44 @@ export default function BasicInfo({ data, updateData }: any) {
               <Picker.Item label="Navoiy viloyati" value="Navoiy viloyati" />
               <Picker.Item label="Jizzax viloyati" value="Jizzax viloyati" />
               <Picker.Item label="Sirdaryo viloyati" value="Sirdaryo viloyati" />
-              <Picker.Item label="Qoraqalpog'iston" value="Qoraqalpog'iston" />
+              <Picker.Item label="Qoraqalpog'iston Respublikasi" value="Qoraqalpog'iston Respublikasi" />
             </Picker>
           </View>
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>City / District (city)</Text>
+          <Text style={styles.label}>City / District</Text>
           {cityOptions.length > 0 ? (
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={formData.city} onValueChange={(v) => handleChange('city', v)}>
-                <Picker.Item label="Select City / District" value="" />
-                {cityOptions.map(c => <Picker.Item key={c} label={c} value={c} />)}
-              </Picker>
-            </View>
+            <>
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={cityManualMode ? MANUAL_OPTION : formData.city}
+                  onValueChange={(v) => {
+                    if (v === MANUAL_OPTION) {
+                      setCityManualMode(true);
+                    } else if (v === '') {
+                      setCityManualMode(false);
+                      handleChange('city', '');
+                    } else {
+                      setCityManualMode(false);
+                      handleChange('city', v);
+                    }
+                  }}
+                >
+                  <Picker.Item label="Select City / District" value="" />
+                  {cityOptions.map(c => <Picker.Item key={c} label={c} value={c} />)}
+                  <Picker.Item label="✎ Boshqa (Enter manually)" value={MANUAL_OPTION} />
+                </Picker>
+              </View>
+              {cityManualMode && (
+                <TextInput
+                  style={[styles.input, { marginTop: 8 }]}
+                  value={formData.city === MANUAL_OPTION ? '' : formData.city}
+                  onChangeText={(v) => handleChange('city', v)}
+                  placeholder="Shahar yoki tuman nomini kiriting..."
+                />
+              )}
+            </>
           ) : (
             <TextInput
               style={[styles.input, !formData.region && styles.inputDisabled]}
@@ -198,16 +250,16 @@ export default function BasicInfo({ data, updateData }: any) {
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>MFY / Neighborhood (mfy) — optional</Text>
+          <Text style={styles.label}>MFY</Text>
           <TextInput
             style={styles.input}
             value={formData.mfy}
             onChangeText={(v) => handleChange('mfy', v)}
-            placeholder="e.g., Chilonzor"
+            placeholder="MFY"
           />
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Street (street)</Text>
+          <Text style={styles.label}>Street</Text>
           <TextInput
             style={styles.input}
             value={formData.street}
@@ -216,7 +268,7 @@ export default function BasicInfo({ data, updateData }: any) {
           />
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>House No (house)</Text>
+          <Text style={styles.label}>House No</Text>
           <TextInput
             style={styles.input}
             value={formData.house}
@@ -226,11 +278,11 @@ export default function BasicInfo({ data, updateData }: any) {
         </View>
         <View style={styles.row}>
           <View style={styles.half}>
-            <Text style={styles.label}>Latitude (lat)</Text>
+            <Text style={styles.label}>Latitude</Text>
             <TextInput style={styles.input} value={formData.lat} onChangeText={(v) => handleChange('lat', v)} placeholder="41.2995" keyboardType="decimal-pad" />
           </View>
           <View style={styles.half}>
-            <Text style={styles.label}>Longitude (lon)</Text>
+            <Text style={styles.label}>Longitude</Text>
             <TextInput style={styles.input} value={formData.lon} onChangeText={(v) => handleChange('lon', v)} placeholder="69.2401" keyboardType="decimal-pad" />
           </View>
         </View>
@@ -243,16 +295,16 @@ export default function BasicInfo({ data, updateData }: any) {
           <Text style={styles.sectionTitle}>Owner Information</Text>
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Owner Full Name (owner)</Text>
+          <Text style={styles.label}>Owner Full Name</Text>
           <TextInput
             style={styles.input}
             value={formData.owner}
             onChangeText={(v) => handleChange('owner', v)}
-            placeholder="e.g., Karimov Akmal Shavkatovich"
+            placeholder="FISH"
           />
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Number of Residents (residents)</Text>
+          <Text style={styles.label}>Number of Residents</Text>
           <View style={styles.pickerContainer}>
             <Picker
               selectedValue={formData.residents}
@@ -264,15 +316,15 @@ export default function BasicInfo({ data, updateData }: any) {
           </View>
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Electricity Account (elec_account)</Text>
+          <Text style={styles.label}>Electricity Account</Text>
           <TextInput style={styles.input} value={formData.elec_account} onChangeText={(v) => handleChange('elec_account', v)} placeholder="Account number" keyboardType="numeric" />
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Gas Account (gas_account)</Text>
+          <Text style={styles.label}>Gas Account</Text>
           <TextInput style={styles.input} value={formData.gas_account} onChangeText={(v) => handleChange('gas_account', v)} placeholder="Account number" keyboardType="numeric" />
         </View>
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 

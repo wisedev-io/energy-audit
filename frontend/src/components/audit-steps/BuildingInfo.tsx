@@ -14,7 +14,7 @@ const YR_BUILT = Array.from({ length: YEAR - 1919 }, (_, i) => String(YEAR - i))
 const YR_RENOV = ["Yo'q", ...Array.from({ length: YEAR - 1949 }, (_, i) => String(YEAR - i))];
 const WALL_THICK = ['12', '15', '20', '25', '30', '38', '40', '45', '50', '60', '80'];
 
-export default function BuildingInfo({ data, updateData }: any) {
+export default function BuildingInfo({ data, updateData, embedded }: any) {
   const [formData, setFormData] = useState({
     floors: data.floors || '',
     rooms: data.rooms || '',
@@ -42,8 +42,9 @@ export default function BuildingInfo({ data, updateData }: any) {
     updateData(newData);
   };
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
       {/* ── Building Structure ───────────────────────────────────────────── */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -85,11 +86,11 @@ export default function BuildingInfo({ data, updateData }: any) {
         {/* Areas */}
         <View style={styles.row}>
           <View style={styles.half}>
-            <Text style={styles.label}>Total Area m² (area_total)</Text>
+            <Text style={styles.label}>Total Area m²</Text>
             <TextInput style={styles.input} value={formData.area_total} onChangeText={(v) => handleChange('area_total', v)} placeholder="0.0" keyboardType="decimal-pad" />
           </View>
           <View style={styles.half}>
-            <Text style={styles.label}>Heated Area m² (heat_area)</Text>
+            <Text style={styles.label}>Heated Area m²</Text>
             <TextInput style={styles.input} value={formData.heat_area} onChangeText={(v) => handleChange('heat_area', v)} placeholder="0.0" keyboardType="decimal-pad" />
           </View>
         </View>
@@ -97,7 +98,7 @@ export default function BuildingInfo({ data, updateData }: any) {
         {/* Year Built / Renovated */}
         <View style={styles.row}>
           <View style={styles.half}>
-            <Text style={styles.label}>Year Built (yr_built)</Text>
+            <Text style={styles.label}>Year Built</Text>
             <View style={styles.pickerContainer}>
               <Picker selectedValue={formData.yr_built} onValueChange={(v) => handleChange('yr_built', String(v))}>
                 <Picker.Item label="Select year" value="" />
@@ -106,7 +107,7 @@ export default function BuildingInfo({ data, updateData }: any) {
             </View>
           </View>
           <View style={styles.half}>
-            <Text style={styles.label}>Year Renovated (yr_renov)</Text>
+            <Text style={styles.label}>Year Renovated</Text>
             <View style={styles.pickerContainer}>
               <Picker selectedValue={formData.yr_renov} onValueChange={(v) => handleChange('yr_renov', String(v))}>
                 <Picker.Item label="Select year" value="" />
@@ -126,14 +127,14 @@ export default function BuildingInfo({ data, updateData }: any) {
 
         <HistoryTextInput
           fieldKey="wall_mat"
-          label="Wall Material (wall_mat)"
+          label="Wall Material"
           value={formData.wall_mat}
           onChangeText={(v) => handleChange('wall_mat', v)}
           placeholder="e.g., G'isht, Beton, Gazobeton…"
         />
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Wall Thickness cm (wall_thick)</Text>
+          <Text style={styles.label}>Wall Thickness cm</Text>
           <View style={styles.pickerContainer}>
             <Picker selectedValue={formData.wall_thick} onValueChange={(v) => handleChange('wall_thick', String(v))}>
               <Picker.Item label="Select thickness" value="" />
@@ -144,42 +145,42 @@ export default function BuildingInfo({ data, updateData }: any) {
 
         <HistoryTextInput
           fieldKey="wall_insul"
-          label="Wall Insulation (wall_insul)"
+          label="Wall Insulation"
           value={formData.wall_insul}
           onChangeText={(v) => handleChange('wall_insul', v)}
           placeholder="e.g., Yo'q, Mineral jun, Penoplast…"
         />
         <HistoryTextInput
           fieldKey="roof_mat"
-          label="Roof Material (roof_mat)"
+          label="Roof Material"
           value={formData.roof_mat}
           onChangeText={(v) => handleChange('roof_mat', v)}
           placeholder="e.g., Tekis tom, Shifer, Metall profil…"
         />
         <HistoryTextInput
           fieldKey="floor_mat"
-          label="Floor Material (floor_mat)"
+          label="Floor Material"
           value={formData.floor_mat}
           onChangeText={(v) => handleChange('floor_mat', v)}
           placeholder="e.g., Beton, Yog'och, Keramika…"
         />
         <HistoryTextInput
           fieldKey="floor_insul"
-          label="Floor Insulation (floor_insul)"
+          label="Floor Insulation"
           value={formData.floor_insul}
           onChangeText={(v) => handleChange('floor_insul', v)}
           placeholder="e.g., Yo'q, Penoplast, Mineral jun…"
         />
         <HistoryTextInput
           fieldKey="basement_mat"
-          label="Basement Material (basement_mat)"
+          label="Basement Material"
           value={formData.basement_mat}
           onChangeText={(v) => handleChange('basement_mat', v)}
           placeholder="e.g., Yo'q"
         />
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Basement Area m² (basement_area)</Text>
+          <Text style={styles.label}>Basement Area m²</Text>
           <TextInput style={styles.input} value={formData.basement_area} onChangeText={(v) => handleChange('basement_area', v)} placeholder="—" keyboardType="decimal-pad" />
         </View>
       </View>
@@ -190,43 +191,29 @@ export default function BuildingInfo({ data, updateData }: any) {
           <Ionicons name="expand" size={20} color="#2563eb" />
           <Text style={styles.sectionTitle}>Windows & Doors</Text>
         </View>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Window Material (win_mat)</Text>
-          <View style={styles.pickerContainer}>
-            <Picker selectedValue={formData.win_mat} onValueChange={(v) => handleChange('win_mat', v)}>
-              <Picker.Item label="Select" value="" />
-              <Picker.Item label="Plastik (PVC)" value="Plastik (PVC)" />
-              <Picker.Item label="Alyuminiy" value="Alyuminiy" />
-              <Picker.Item label="Yog'och" value="Yog'och" />
-              <Picker.Item label="Boshqa" value="Boshqa" />
-            </Picker>
-          </View>
-        </View>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Window Glazing Layers (win_layers)</Text>
-          <View style={styles.pickerContainer}>
-            <Picker selectedValue={formData.win_layers} onValueChange={(v) => handleChange('win_layers', v)}>
-              <Picker.Item label="Select" value="" />
-              <Picker.Item label="1 qavat (Single)" value="1" />
-              <Picker.Item label="2 qavat (Double)" value="2" />
-              <Picker.Item label="3 qavat (Triple)" value="3" />
-            </Picker>
-          </View>
-        </View>
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Door Material (door_mat)</Text>
-          <View style={styles.pickerContainer}>
-            <Picker selectedValue={formData.door_mat} onValueChange={(v) => handleChange('door_mat', v)}>
-              <Picker.Item label="Select" value="" />
-              <Picker.Item label="Metall" value="Metall" />
-              <Picker.Item label="Yog'och" value="Yog'och" />
-              <Picker.Item label="Plastik" value="Plastik" />
-              <Picker.Item label="Izolyatsiyali" value="Izolyatsiyali" />
-            </Picker>
-          </View>
-        </View>
+        <HistoryTextInput
+          fieldKey="win_mat"
+          label="Window Material"
+          value={formData.win_mat}
+          onChangeText={(v) => handleChange('win_mat', v)}
+          placeholder="e.g., Plastik (PVC), Alyuminiy, Yog'och…"
+        />
+        <HistoryTextInput
+          fieldKey="win_layers"
+          label="Window Glazing Layers"
+          value={formData.win_layers}
+          onChangeText={(v) => handleChange('win_layers', v)}
+          placeholder="e.g., 1, 2, 3"
+        />
+        <HistoryTextInput
+          fieldKey="door_mat"
+          label="Door Material"
+          value={formData.door_mat}
+          onChangeText={(v) => handleChange('door_mat', v)}
+          placeholder="e.g., Metall, Yog'och, Plastik…"
+        />
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 

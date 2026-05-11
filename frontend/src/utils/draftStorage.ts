@@ -1,11 +1,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const DRAFT_KEY_NEW = '@audit_draft_new';
+const DRAFTS_KEY = '@audit_drafts';
+const LEGACY_KEY = '@audit_draft_new';
 const BASE_URL = 'http://157.180.28.98:5050';
 
 let _serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
+let _syncRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+export type SyncStatus = 'idle' | 'syncing' | 'ok' | 'failed';
+let _syncStatus: SyncStatus = 'idle';
+let _syncStatusCb: ((s: SyncStatus) => void) | null = null;
+
+function setSyncStatus(s: SyncStatus) {
+  _syncStatus = s;
+  _syncStatusCb?.(s);
+}
 
 export interface AuditDraft {
+  id: string;
   formData: any;
   step: number;
   savedAt: number;
@@ -26,47 +38,119 @@ function stripPhotos(formData: any): any {
   return stripped;
 }
 
+async function readAll(): Promise<AuditDraft[]> {
+  try {
+    const raw = await AsyncStorage.getItem(DRAFTS_KEY);
+    if (raw) return JSON.parse(raw) as AuditDraft[];
+    const legacy = await AsyncStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const parsed = JSON.parse(legacy);
+      const id = parsed.formData?.draft_id || parsed.formData?.case_number || 'draft_legacy';
+      const migrated: AuditDraft = { id, formData: parsed.formData, step: parsed.step, savedAt: parsed.savedAt || Date.now() };
+      await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify([migrated]));
+      await AsyncStorage.removeItem(LEGACY_KEY);
+      return [migrated];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeAll(drafts: AuditDraft[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+  } catch (e) {
+    console.warn('[draftStorage] AsyncStorage write failed:', e);
+  }
+}
+
+// Retry delays: 5s then 15s after the initial attempt
+const RETRY_DELAYS = [5000, 15000];
+
+async function _doServerSync(token: string, formData: any, step: number, attempt: number): Promise<void> {
+  if (_syncRetryTimer) { clearTimeout(_syncRetryTimer); _syncRetryTimer = null; }
+  setSyncStatus('syncing');
+  try {
+    const stripped = stripPhotos(formData);
+    const res = await fetch(`${BASE_URL}/drafts`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ formData: stripped, step }),
+    });
+    let json: any = {};
+    try { json = await res.json(); } catch {}
+    if (!res.ok || json.success === false) throw new Error(json.error || `HTTP ${res.status}`);
+    setSyncStatus('ok');
+  } catch (e) {
+    console.warn(`[draftStorage] Server sync attempt ${attempt + 1} failed:`, e);
+    if (attempt < RETRY_DELAYS.length) {
+      _syncRetryTimer = setTimeout(
+        () => _doServerSync(token, formData, step, attempt + 1),
+        RETRY_DELAYS[attempt],
+      );
+      // keep status as 'syncing' — retries are still pending
+    } else {
+      setSyncStatus('failed');
+    }
+  }
+}
+
 export const draftStorage = {
   save: async (formData: any, step: number): Promise<void> => {
-    try {
-      const stripped = stripPhotos(formData);
-      const draft: AuditDraft = { formData: stripped, step, savedAt: Date.now() };
-      await AsyncStorage.setItem(DRAFT_KEY_NEW, JSON.stringify(draft));
-    } catch {}
+    const id = formData.draft_id || formData.case_number || `draft_${Date.now()}`;
+    const stripped = stripPhotos(formData);
+    const drafts = await readAll();
+    const idx = drafts.findIndex(d => d.id === id);
+    const draft: AuditDraft = { id, formData: stripped, step, savedAt: Date.now() };
+    if (idx >= 0) drafts[idx] = draft;
+    else drafts.push(draft);
+    await writeAll(drafts);
+  },
+
+  loadAll: async (): Promise<AuditDraft[]> => {
+    const drafts = await readAll();
+    return drafts.sort((a, b) => b.savedAt - a.savedAt);
   },
 
   load: async (): Promise<AuditDraft | null> => {
-    try {
-      const raw = await AsyncStorage.getItem(DRAFT_KEY_NEW);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
+    const drafts = await readAll();
+    if (!drafts.length) return null;
+    return drafts.sort((a, b) => b.savedAt - a.savedAt)[0];
+  },
+
+  clearById: async (id: string): Promise<void> => {
+    const drafts = await readAll();
+    await writeAll(drafts.filter(d => d.id !== id));
   },
 
   clear: async (): Promise<void> => {
-    try {
-      await AsyncStorage.removeItem(DRAFT_KEY_NEW);
-    } catch {}
+    try { await AsyncStorage.removeItem(DRAFTS_KEY); } catch {}
   },
 
-  // Server sync — debounced 2s to avoid hammering the server on every keystroke
   syncToServer: (token: string, formData: any, step: number): void => {
     if (!token) return;
+    // Cancel any pending debounce and any pending retry
     if (_serverSyncTimer) clearTimeout(_serverSyncTimer);
-    _serverSyncTimer = setTimeout(async () => {
-      try {
-        const stripped = stripPhotos(formData);
-        await fetch(`${BASE_URL}/drafts`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ formData: stripped, step }),
-        });
-      } catch {}
-    }, 2000);
+    if (_syncRetryTimer) { clearTimeout(_syncRetryTimer); _syncRetryTimer = null; }
+    _serverSyncTimer = setTimeout(() => _doServerSync(token, formData, step, 0), 2000);
+  },
+
+  syncToServerNow: async (token: string, formData: any, step: number): Promise<void> => {
+    if (!token) return;
+    if (_serverSyncTimer) { clearTimeout(_serverSyncTimer); _serverSyncTimer = null; }
+    await _doServerSync(token, formData, step, 0);
+  },
+
+  clearOnServer: (token: string): void => {
+    if (!token) return;
+    fetch(`${BASE_URL}/drafts`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    }).catch(e => console.warn('[draftStorage] Failed to clear server draft:', e));
   },
 
   loadFromServer: async (token: string): Promise<AuditDraft | null> => {
@@ -77,7 +161,9 @@ export const draftStorage = {
       });
       const json = await res.json();
       if (json.success && json.draft) {
+        const id = json.draft.formData?.draft_id || json.draft.formData?.case_number || 'server_draft';
         return {
+          id,
           formData: json.draft.formData,
           step: json.draft.step,
           savedAt: json.draft.savedAt ? new Date(json.draft.savedAt).getTime() : Date.now(),
@@ -89,30 +175,10 @@ export const draftStorage = {
     }
   },
 
-  // Immediate sync — used when app goes to background (bypasses the 2s debounce)
-  syncToServerNow: async (token: string, formData: any, step: number): Promise<void> => {
-    if (!token) return;
-    if (_serverSyncTimer) { clearTimeout(_serverSyncTimer); _serverSyncTimer = null; }
-    try {
-      const stripped = stripPhotos(formData);
-      await fetch(`${BASE_URL}/drafts`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ formData: stripped, step }),
-      });
-    } catch {}
-  },
+  getSyncStatus: (): SyncStatus => _syncStatus,
 
-  clearOnServer: (token: string): void => {
-    if (!token) return;
-    fetch(`${BASE_URL}/drafts`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` },
-    }).catch(() => {});
-  },
+  onSyncStatus: (cb: (s: SyncStatus) => void): void => { _syncStatusCb = cb; },
+  offSyncStatus: (): void => { _syncStatusCb = null; },
 
   formatAge: (savedAt: number): string => {
     const mins = Math.round((Date.now() - savedAt) / 60000);

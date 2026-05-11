@@ -9,9 +9,10 @@ interface Props {
   value: string;
   onChangeText: (v: string) => void;
   placeholder?: string;
+  multiline?: boolean;
 }
 
-export default function HistoryTextInput({ fieldKey, label, value, onChangeText, placeholder }: Props) {
+export default function HistoryTextInput({ fieldKey, label, value, onChangeText, placeholder, multiline }: Props) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -37,13 +38,14 @@ export default function HistoryTextInput({ fieldKey, label, value, onChangeText,
     <View style={styles.wrap}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, multiline && styles.multiline]}
         value={value}
         onChangeText={onChangeText}
         onFocus={handleFocus}
         onBlur={handleBlur}
         placeholder={placeholder}
         placeholderTextColor="#9ca3af"
+        multiline={multiline}
       />
       {open && suggestions.length > 0 && (
         <View style={styles.dropdown}>
@@ -106,4 +108,5 @@ const styles = StyleSheet.create({
     borderTopColor: '#f3f4f6',
   },
   itemText: { fontSize: 14, color: '#374151', flex: 1 },
+  multiline: { height: 80, textAlignVertical: 'top' },
 });

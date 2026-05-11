@@ -21,7 +21,7 @@ interface MeasPhoto {
 function makeId() { return `${Date.now()}_${Math.random().toString(36).slice(2)}`; }
 function fmtBytes(b: number) { return b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`; }
 
-export default function Measurements({ data, updateData }: any) {
+export default function Measurements({ data, updateData, embedded }: any) {
   const [formData, setFormData] = useState({
     r1_temp: data.r1_temp || '',
     r1_hum: data.r1_hum || '',
@@ -295,15 +295,9 @@ export default function Measurements({ data, updateData }: any) {
     );
   };
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.infoBox}>
-        <Ionicons name="information-circle" size={18} color="#2563eb" />
-        <Text style={styles.infoText}>
-          Enter measurements for 2 rooms. Rooms 3 & 4 are auto-generated with ±5 variation in the report.
-        </Text>
-      </View>
-
+    <Wrapper style={styles.container}>
       {rooms.map(({ label, prefix }) => (
         <View key={prefix} style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -312,7 +306,7 @@ export default function Measurements({ data, updateData }: any) {
           </View>
           <View style={styles.row}>
             <View style={styles.third}>
-              <Text style={styles.label}>Temp °C ({prefix}_temp)</Text>
+              <Text style={styles.label}>Temp °C</Text>
               <TextInput
                 style={styles.input}
                 value={(formData as any)[`${prefix}_temp`]}
@@ -322,7 +316,7 @@ export default function Measurements({ data, updateData }: any) {
               />
             </View>
             <View style={styles.third}>
-              <Text style={styles.label}>Humidity % ({prefix}_hum)</Text>
+              <Text style={styles.label}>Humidity %</Text>
               <TextInput
                 style={styles.input}
                 value={(formData as any)[`${prefix}_hum`]}
@@ -332,7 +326,7 @@ export default function Measurements({ data, updateData }: any) {
               />
             </View>
             <View style={styles.third}>
-              <Text style={styles.label}>Light lux ({prefix}_lux)</Text>
+              <Text style={styles.label}>Light lux</Text>
               <TextInput
                 style={styles.input}
                 value={(formData as any)[`${prefix}_lux`]}
@@ -351,7 +345,7 @@ export default function Measurements({ data, updateData }: any) {
           <Text style={styles.sectionTitle}>U-value Reference Temperature</Text>
         </View>
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Outside Temperature °C (u1_temp)</Text>
+          <Text style={styles.label}>Outside Temperature °C</Text>
           <TextInput
             style={styles.input}
             value={formData.u1_temp}
@@ -369,14 +363,12 @@ export default function Measurements({ data, updateData }: any) {
 
       {renderPhotoSection('th', 'Harorat & Namlik rasmlari', 'thermometer')}
       {renderPhotoSection('lux', "Yorug'lik o'lchovi rasmlari", 'sunny')}
-    </ScrollView>
+    </Wrapper>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  infoBox: { flexDirection: 'row', gap: 10, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', borderRadius: 12, padding: 14, marginBottom: 16 },
-  infoText: { flex: 1, fontSize: 13, color: '#1e40af', lineHeight: 20 },
   section: { backgroundColor: '#fff', borderRadius: 16, padding: 20, marginBottom: 16, elevation: 2 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: '#111827', flex: 1 },

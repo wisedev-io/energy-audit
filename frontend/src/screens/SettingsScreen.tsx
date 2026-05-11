@@ -1,20 +1,101 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, ActivityIndicator } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import {
+  View, Text, ScrollView, StyleSheet, TouchableOpacity,
+  Alert, TextInput, ActivityIndicator,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors, Radius, Shadow, Space } from '../theme';
 
 const BASE_URL = 'http://157.180.28.98:5050';
 
-export default function SettingsScreen({ onLogout, user }: { onLogout: () => void, user: any }) {
+function AvatarLetters({ name }: { name: string }) {
+  const initials = name
+    .split(' ')
+    .slice(0, 2)
+    .map(w => w[0]?.toUpperCase() || '')
+    .join('');
+  return (
+    <View style={avatarStyles.wrap}>
+      <Text style={avatarStyles.text}>{initials || '?'}</Text>
+    </View>
+  );
+}
+const avatarStyles = StyleSheet.create({
+  wrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  text: { fontSize: 22, fontWeight: '700', color: Colors.white },
+});
+
+type SettingRowProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconColor?: string;
+  iconBg?: string;
+  label: string;
+  value?: string;
+  onPress?: () => void;
+  chevron?: boolean;
+  last?: boolean;
+};
+function SettingRow({ icon, iconColor = Colors.primary, iconBg = Colors.primaryLight, label, value, onPress, chevron = true, last = false }: SettingRowProps) {
+  return (
+    <TouchableOpacity
+      style={[rowStyles.row, !last && rowStyles.rowBorder]}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.6 : 1}
+      disabled={!onPress}
+    >
+      <View style={[rowStyles.iconWrap, { backgroundColor: iconBg }]}>
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={rowStyles.labelWrap}>
+        <Text style={rowStyles.label}>{label}</Text>
+        {value ? <Text style={rowStyles.value} numberOfLines={1}>{value}</Text> : null}
+      </View>
+      {chevron && onPress ? (
+        <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+const rowStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: Space.lg,
+    gap: Space.md,
+  },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  labelWrap: { flex: 1 },
+  label: { fontSize: 15, fontWeight: '500', color: Colors.text },
+  value: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+});
+
+export default function SettingsScreen({ onLogout, user }: { onLogout: () => void; user: any }) {
+  const insets = useSafeAreaInsets();
   const [audName, setAudName] = useState('');
   const [audJshshr, setAudJshshr] = useState('');
   const [profileLoading, setProfileLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   useEffect(() => {
     const loadProfile = async () => {
-      // Show cached values instantly — no spinner if we have them
       const cached = await AsyncStorage.getItem('auditor_profile');
       if (cached) {
         const p = JSON.parse(cached);
@@ -22,11 +103,10 @@ export default function SettingsScreen({ onLogout, user }: { onLogout: () => voi
         setAudJshshr(p.aud_jshshr || '');
         setProfileLoading(false);
       }
-      // Sync with server in background
       try {
         const token = await AsyncStorage.getItem('auth_token');
         const res = await fetch(`${BASE_URL}/auth/profile`, {
-          headers: { 'Authorization': `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}` },
         });
         const json = await res.json();
         if (json.success) {
@@ -37,7 +117,7 @@ export default function SettingsScreen({ onLogout, user }: { onLogout: () => voi
           await AsyncStorage.setItem('auditor_profile', JSON.stringify({ aud_name: name, aud_jshshr: jshshr }));
         }
       } catch {
-        // server unreachable — cached values already shown
+        // use cached
       } finally {
         setProfileLoading(false);
       }
@@ -51,7 +131,7 @@ export default function SettingsScreen({ onLogout, user }: { onLogout: () => voi
       const token = await AsyncStorage.getItem('auth_token');
       const res = await fetch(`${BASE_URL}/auth/profile`, {
         method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ aud_name: audName, aud_jshshr: audJshshr }),
       });
       const json = await res.json();
@@ -75,131 +155,248 @@ export default function SettingsScreen({ onLogout, user }: { onLogout: () => voi
     ]);
   };
 
-  return (
-    <ScrollView style={styles.container}>
-      <LinearGradient colors={['#2563eb', '#1d4ed8']} style={styles.header}>
-        <Text style={styles.headerTitle}>Settings</Text>
-        <Text style={styles.headerSubtitle}>Account & Configuration</Text>
-      </LinearGradient>
+  const displayName = user?.full_name || user?.username || 'User';
 
-      <View style={styles.content}>
-        {/* Account card */}
+  return (
+    <View style={[styles.container]}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <Text style={styles.headerTitle}>Settings</Text>
+      </View>
+
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* Profile card */}
         <View style={styles.profileCard}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={32} color="#fff" />
-          </View>
+          <AvatarLetters name={displayName} />
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{user?.full_name || user?.username || 'User'}</Text>
-            <Text style={styles.profileRole}>@{user?.username} · {user?.role}</Text>
+            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileMeta}>@{user?.username} · {user?.role}</Text>
+          </View>
+          <View style={[styles.roleChip, user?.role === 'admin' && styles.roleChipAdmin]}>
+            <Text style={[styles.roleChipText, user?.role === 'admin' && styles.roleChipTextAdmin]}>
+              {user?.role === 'admin' ? 'Admin' : 'Auditor'}
+            </Text>
           </View>
         </View>
 
-        {/* Auditor profile */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="id-card" size={20} color="#2563eb" />
-            <Text style={styles.sectionTitle}>Auditor Profile</Text>
+        {/* Auditor Profile section */}
+        <Text style={styles.sectionLabel}>Auditor Profile</Text>
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionCardHeader}>
+            <Ionicons name="id-card-outline" size={16} color={Colors.primary} />
+            <Text style={styles.sectionCardTitle}>Auto-filled on every new case</Text>
           </View>
-          <Text style={styles.sectionSubtitle}>
-            Saved once here — auto-filled on every new case.
-          </Text>
 
           {profileLoading ? (
-            <ActivityIndicator size="small" color="#2563eb" style={{ marginVertical: 16 }} />
+            <View style={styles.loadingRow}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.loadingText}>Loading profile…</Text>
+            </View>
           ) : (
             <>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Auditor Full Name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={audName}
-                  onChangeText={setAudName}
-                  placeholder="Full Name"
-                  autoCorrect={false}
-                />
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>Auditor Full Name</Text>
+                <View style={[styles.inputWrap, focusedField === 'name' && styles.inputWrapFocused]}>
+                  <TextInput
+                    style={styles.input}
+                    value={audName}
+                    onChangeText={setAudName}
+                    placeholder="Full Name"
+                    placeholderTextColor={Colors.textMuted}
+                    autoCorrect={false}
+                    onFocus={() => setFocusedField('name')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                </View>
               </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>JSHSHR (ID Number)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={audJshshr}
-                  onChangeText={setAudJshshr}
-                  placeholder="14-digit personal ID"
-                  keyboardType="numeric"
-                />
+
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>JSHSHR (ID Number)</Text>
+                <View style={[styles.inputWrap, focusedField === 'jshshr' && styles.inputWrapFocused]}>
+                  <TextInput
+                    style={styles.input}
+                    value={audJshshr}
+                    onChangeText={setAudJshshr}
+                    placeholder="14-digit personal ID"
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="numeric"
+                    onFocus={() => setFocusedField('jshshr')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                </View>
               </View>
+
               <TouchableOpacity
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
                 onPress={handleSaveProfile}
                 disabled={saving}
+                activeOpacity={0.85}
               >
-                {saving
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Ionicons name="checkmark" size={18} color="#fff" />
-                }
-                <Text style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save Profile'}</Text>
+                {saving ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <Ionicons name="checkmark-outline" size={18} color={Colors.white} />
+                )}
+                <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save Profile'}</Text>
               </TouchableOpacity>
             </>
           )}
         </View>
 
-        {/* App info */}
-        <View style={styles.section}>
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingIcon}>
-              <Ionicons name="cloud-upload" size={20} color="#2563eb" />
+        {/* App info section */}
+        <Text style={styles.sectionLabel}>Application</Text>
+        <View style={styles.sectionCard}>
+          <SettingRow
+            icon="cloud-outline"
+            label="Server"
+            value="157.180.28.98:5050"
+            chevron={false}
+          />
+          <SettingRow
+            icon="flash-outline"
+            label="App Version"
+            value="Energy Audit v1.0.0"
+            chevron={false}
+            last
+          />
+        </View>
+
+        {/* Sign Out */}
+        <Text style={styles.sectionLabel}>Account</Text>
+        <View style={styles.sectionCard}>
+          <TouchableOpacity style={styles.logoutRow} onPress={handleLogout} activeOpacity={0.7}>
+            <View style={[rowStyles.iconWrap, { backgroundColor: Colors.dangerLight }]}>
+              <Ionicons name="log-out-outline" size={18} color={Colors.danger} />
             </View>
-            <View style={styles.settingText}>
-              <Text style={styles.settingLabel}>Server</Text>
-              <Text style={styles.settingSubtitle}>157.180.28.98:5050</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingIcon}>
-              <Ionicons name="information-circle" size={20} color="#2563eb" />
-            </View>
-            <View style={styles.settingText}>
-              <Text style={styles.settingLabel}>About</Text>
-              <Text style={styles.settingSubtitle}>Energy Audit v1.0.0</Text>
-            </View>
+            <Text style={styles.logoutText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out" size={20} color="#ef4444" />
-          <Text style={styles.logoutText}>Sign Out</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+        <View style={{ height: 24 }} />
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  header: { paddingTop: 60, paddingBottom: 24, paddingHorizontal: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff' },
-  headerSubtitle: { fontSize: 14, color: '#bfdbfe', marginTop: 4 },
-  content: { padding: 16 },
-  profileCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2 },
-  avatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#2563eb', alignItems: 'center', justifyContent: 'center', marginRight: 16 },
+  container: { flex: 1, backgroundColor: Colors.bg },
+
+  header: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Space.lg,
+    paddingBottom: Space.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    ...Shadow.sm,
+  },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: Colors.text },
+
+  scroll: { flex: 1 },
+  scrollContent: { paddingTop: Space.xl, paddingHorizontal: Space.lg },
+
+  profileCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Space.lg,
+    marginBottom: Space.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadow.sm,
+  },
   profileInfo: { flex: 1 },
-  profileName: { fontSize: 18, fontWeight: '600', color: '#111827' },
-  profileRole: { fontSize: 13, color: '#6b7280', marginTop: 4 },
-  section: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#111827' },
-  sectionSubtitle: { fontSize: 12, color: '#9ca3af', marginBottom: 16 },
-  inputGroup: { marginBottom: 14 },
-  label: { fontSize: 12, color: '#6b7280', marginBottom: 6, fontWeight: '500' },
-  input: { backgroundColor: '#f9fafb', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#111827' },
-  saveButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#2563eb', borderRadius: 12, paddingVertical: 13, marginTop: 4 },
-  saveButtonDisabled: { opacity: 0.6 },
-  saveButtonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  settingItem: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 12 },
-  settingIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  settingText: { flex: 1 },
-  settingLabel: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  settingSubtitle: { fontSize: 12, color: '#6b7280', marginTop: 2 },
-  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 16, paddingVertical: 16, marginBottom: 24 },
-  logoutText: { fontSize: 16, fontWeight: '600', color: '#ef4444' },
+  profileName: { fontSize: 17, fontWeight: '700', color: Colors.text },
+  profileMeta: { fontSize: 13, color: Colors.textSec, marginTop: 3 },
+  roleChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.surface2,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  roleChipAdmin: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  roleChipText: { fontSize: 11, fontWeight: '600', color: Colors.textSec },
+  roleChipTextAdmin: { color: Colors.primary },
+
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: Space.sm,
+    marginLeft: Space.xs,
+  },
+  sectionCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    marginBottom: Space.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    overflow: 'hidden',
+    ...Shadow.sm,
+  },
+  sectionCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm,
+    paddingHorizontal: Space.lg,
+    paddingTop: Space.lg,
+    paddingBottom: Space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+  },
+  sectionCardTitle: { fontSize: 13, color: Colors.textSec, fontWeight: '500' },
+
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, padding: Space.xl, justifyContent: 'center' },
+  loadingText: { fontSize: 13, color: Colors.textSec },
+
+  fieldGroup: { paddingHorizontal: Space.lg, paddingTop: Space.md },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSec,
+    marginBottom: 6,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  inputWrap: {
+    backgroundColor: Colors.bg,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+  },
+  inputWrapFocused: { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  input: {
+    paddingHorizontal: Space.md,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: Colors.text,
+  },
+
+  saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.md,
+    paddingVertical: 13,
+    margin: Space.lg,
+    ...Shadow.sm,
+  },
+  saveBtnDisabled: { opacity: 0.65 },
+  saveBtnText: { fontSize: 15, fontWeight: '600', color: Colors.white },
+
+  logoutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    padding: Space.lg,
+  },
+  logoutText: { fontSize: 15, fontWeight: '600', color: Colors.danger },
 });

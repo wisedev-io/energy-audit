@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -21,8 +21,7 @@ interface FPPhoto {
 function makeId() { return `${Date.now()}_${Math.random().toString(36).slice(2)}`; }
 function fmtBytes(b: number) { return b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`; }
 
-export default function Dimensions({ data, updateData }: any) {
-  const [activeTab, setActiveTab] = useState<'floor'|'door'|'window'|'wall'>('floor');
+export default function Dimensions({ data, updateData, embedded }: any) {
 
   const [floors, setFloors] = useState(data.floors_list || [{ l: '', w: '' }]);
   const [doors, setDoors] = useState(data.doors_list || [{ w: '', h: '', n: '1' }]);
@@ -217,103 +216,13 @@ export default function Dimensions({ data, updateData }: any) {
     syncToForm(list === floors ? newList : floors, list === doors ? newList : doors, list === windows ? newList : windows, list === walls ? newList : walls);
   };
 
-  const tabs = ['floor', 'door', 'window', 'wall'];
-
-  const renderFloors = () => (
-    <>
-      {floors.map((row: any, i: number) => (
-        <View key={i} style={styles.rowCard}>
-          <View style={styles.rowHeader}>
-            <Text style={styles.rowTitle}>Floor {i+1}</Text>
-            {floors.length > 1 && <TouchableOpacity onPress={() => delRow(floors, setFloors, i)}><Ionicons name="trash" size={18} color="#ef4444" /></TouchableOpacity>}
-          </View>
-          <View style={styles.inputRow}>
-            <View style={styles.half}><Text style={styles.label}>Length m (floor_l{i+1})</Text><TextInput style={styles.input} value={row.l} onChangeText={(v) => updateRow(floors, setFloors, i, 'l', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-            <View style={styles.half}><Text style={styles.label}>Width m (floor_w{i+1})</Text><TextInput style={styles.input} value={row.w} onChangeText={(v) => updateRow(floors, setFloors, i, 'w', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-          </View>
-          <View style={styles.areaBox}><Text style={styles.areaLabel}>Area: {calcFloorArea(row).toFixed(2)} m²</Text></View>
-        </View>
-      ))}
-      <TouchableOpacity onPress={() => addRow(floors, setFloors, { l: '', w: '' })} style={styles.addBtn}>
-        <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Floor</Text>
-      </TouchableOpacity>
-      <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Floor Area:</Text><Text style={styles.totalValue}>{floors.reduce((s: number, r: any) => s + calcFloorArea(r), 0).toFixed(2)} m²</Text></View>
-    </>
-  );
-
-  const renderDoors = () => (
-    <>
-      {doors.map((row: any, i: number) => (
-        <View key={i} style={styles.rowCard}>
-          <View style={styles.rowHeader}>
-            <Text style={styles.rowTitle}>Door {i+1}</Text>
-            {doors.length > 1 && <TouchableOpacity onPress={() => delRow(doors, setDoors, i)}><Ionicons name="trash" size={18} color="#ef4444" /></TouchableOpacity>}
-          </View>
-          <View style={styles.inputRow}>
-            <View style={styles.third}><Text style={styles.label}>Width (door_w{i+1})</Text><TextInput style={styles.input} value={row.w} onChangeText={(v) => updateRow(doors, setDoors, i, 'w', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-            <View style={styles.third}><Text style={styles.label}>Height (door_h{i+1})</Text><TextInput style={styles.input} value={row.h} onChangeText={(v) => updateRow(doors, setDoors, i, 'h', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-            <View style={styles.third}><Text style={styles.label}>Count (door_n{i+1})</Text><TextInput style={styles.input} value={row.n} onChangeText={(v) => updateRow(doors, setDoors, i, 'n', v)} placeholder="1" keyboardType="numeric" /></View>
-          </View>
-          <View style={styles.areaBox}><Text style={styles.areaLabel}>Area: {calcDoorArea(row).toFixed(2)} m²</Text></View>
-        </View>
-      ))}
-      <TouchableOpacity onPress={() => addRow(doors, setDoors, { w: '', h: '', n: '1' })} style={styles.addBtn}>
-        <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Door</Text>
-      </TouchableOpacity>
-      <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Door Area:</Text><Text style={styles.totalValue}>{doors.reduce((s: number, r: any) => s + calcDoorArea(r), 0).toFixed(2)} m²</Text></View>
-    </>
-  );
-
-  const renderWindows = () => (
-    <>
-      {windows.map((row: any, i: number) => (
-        <View key={i} style={styles.rowCard}>
-          <View style={styles.rowHeader}>
-            <Text style={styles.rowTitle}>Window {i+1}</Text>
-            {windows.length > 1 && <TouchableOpacity onPress={() => delRow(windows, setWindows, i)}><Ionicons name="trash" size={18} color="#ef4444" /></TouchableOpacity>}
-          </View>
-          <View style={styles.inputRow}>
-            <View style={styles.third}><Text style={styles.label}>Width (win_w{i+1})</Text><TextInput style={styles.input} value={row.w} onChangeText={(v) => updateRow(windows, setWindows, i, 'w', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-            <View style={styles.third}><Text style={styles.label}>Height (win_h{i+1})</Text><TextInput style={styles.input} value={row.h} onChangeText={(v) => updateRow(windows, setWindows, i, 'h', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-            <View style={styles.third}><Text style={styles.label}>Count (win_n{i+1})</Text><TextInput style={styles.input} value={row.n} onChangeText={(v) => updateRow(windows, setWindows, i, 'n', v)} placeholder="1" keyboardType="numeric" /></View>
-          </View>
-          <View style={styles.areaBox}><Text style={styles.areaLabel}>Area: {calcWinArea(row).toFixed(2)} m²</Text></View>
-        </View>
-      ))}
-      <TouchableOpacity onPress={() => addRow(windows, setWindows, { w: '', h: '', n: '1' })} style={styles.addBtn}>
-        <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Window</Text>
-      </TouchableOpacity>
-      <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Window Area:</Text><Text style={styles.totalValue}>{windows.reduce((s: number, r: any) => s + calcWinArea(r), 0).toFixed(2)} m²</Text></View>
-    </>
-  );
-
-  const renderWalls = () => (
-    <>
-      {walls.map((row: any, i: number) => (
-        <View key={i} style={styles.rowCard}>
-          <View style={styles.rowHeader}>
-            <Text style={styles.rowTitle}>Wall {i+1}</Text>
-            {walls.length > 1 && <TouchableOpacity onPress={() => delRow(walls, setWalls, i)}><Ionicons name="trash" size={18} color="#ef4444" /></TouchableOpacity>}
-          </View>
-          <View style={styles.inputRow}>
-            <View style={styles.half}><Text style={styles.label}>Perimeter m (wall_p{i+1})</Text><TextInput style={styles.input} value={row.p} onChangeText={(v) => updateRow(walls, setWalls, i, 'p', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-            <View style={styles.half}><Text style={styles.label}>Height m (wall_h{i+1})</Text><TextInput style={styles.input} value={row.h} onChangeText={(v) => updateRow(walls, setWalls, i, 'h', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
-          </View>
-          <View style={styles.areaBox}><Text style={styles.areaLabel}>Area: {calcWallArea(row).toFixed(2)} m²</Text></View>
-        </View>
-      ))}
-      <TouchableOpacity onPress={() => addRow(walls, setWalls, { p: '', h: '' })} style={styles.addBtn}>
-        <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Wall</Text>
-      </TouchableOpacity>
-      <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Wall Area:</Text><Text style={styles.totalValue}>{walls.reduce((s: number, r: any) => s + calcWallArea(r), 0).toFixed(2)} m²</Text></View>
-    </>
-  );
 
   const uploadingCount = fpPhotos.filter(p => p.uploading).length;
   const doneCount = fpPhotos.filter(p => !!p.serverKey).length;
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
 
       {/* ── Floor Plan Photos (Bino rejasi) ──────────────────────────── */}
       <View style={styles.section}>
@@ -402,25 +311,100 @@ export default function Dimensions({ data, updateData }: any) {
         )}
       </View>
 
-      {/* ── Area Measurements ─────────────────────────────────────────── */}
+      {/* ── Floors ───────────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="layers" size={20} color="#2563eb" />
+          <Text style={styles.sectionTitle}>Floors</Text>
+        </View>
+        {floors.map((row: any, i: number) => (
+          <View key={i} style={styles.rowCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.rowNum}>{i+1}</Text>
+              <View style={styles.half}><Text style={styles.label}>Length m</Text><TextInput style={styles.input} value={row.l} onChangeText={(v) => updateRow(floors, setFloors, i, 'l', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <View style={styles.half}><Text style={styles.label}>Width m</Text><TextInput style={styles.input} value={row.w} onChangeText={(v) => updateRow(floors, setFloors, i, 'w', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <Text style={styles.calcResult}>= {calcFloorArea(row).toFixed(2)} m²</Text>
+              {floors.length > 1 && <TouchableOpacity onPress={() => delRow(floors, setFloors, i)} style={styles.trashBtn}><Ionicons name="trash" size={16} color="#ef4444" /></TouchableOpacity>}
+            </View>
+          </View>
+        ))}
+        <TouchableOpacity onPress={() => addRow(floors, setFloors, { l: '', w: '' })} style={styles.addBtn}>
+          <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Floor</Text>
+        </TouchableOpacity>
+        <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Floor Area:</Text><Text style={styles.totalValue}>{floors.reduce((s: number, r: any) => s + calcFloorArea(r), 0).toFixed(2)} m²</Text></View>
+      </View>
+
+      {/* ── Walls ────────────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="contract" size={20} color="#2563eb" />
+          <Text style={styles.sectionTitle}>Walls</Text>
+        </View>
+        {walls.map((row: any, i: number) => (
+          <View key={i} style={styles.rowCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.rowNum}>{i+1}</Text>
+              <View style={styles.half}><Text style={styles.label}>Perimeter m</Text><TextInput style={styles.input} value={row.p} onChangeText={(v) => updateRow(walls, setWalls, i, 'p', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <View style={styles.half}><Text style={styles.label}>Height m</Text><TextInput style={styles.input} value={row.h} onChangeText={(v) => updateRow(walls, setWalls, i, 'h', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <Text style={styles.calcResult}>= {calcWallArea(row).toFixed(2)} m²</Text>
+              {walls.length > 1 && <TouchableOpacity onPress={() => delRow(walls, setWalls, i)} style={styles.trashBtn}><Ionicons name="trash" size={16} color="#ef4444" /></TouchableOpacity>}
+            </View>
+          </View>
+        ))}
+        <TouchableOpacity onPress={() => addRow(walls, setWalls, { p: '', h: '' })} style={styles.addBtn}>
+          <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Wall</Text>
+        </TouchableOpacity>
+        <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Wall Area:</Text><Text style={styles.totalValue}>{walls.reduce((s: number, r: any) => s + calcWallArea(r), 0).toFixed(2)} m²</Text></View>
+      </View>
+
+      {/* ── Windows ──────────────────────────────────────────────────── */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="expand" size={20} color="#2563eb" />
+          <Text style={styles.sectionTitle}>Windows</Text>
+        </View>
+        {windows.map((row: any, i: number) => (
+          <View key={i} style={styles.rowCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.rowNum}>{i+1}</Text>
+              <View style={styles.third}><Text style={styles.label}>Width</Text><TextInput style={styles.input} value={row.w} onChangeText={(v) => updateRow(windows, setWindows, i, 'w', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <View style={styles.third}><Text style={styles.label}>Height</Text><TextInput style={styles.input} value={row.h} onChangeText={(v) => updateRow(windows, setWindows, i, 'h', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <View style={styles.third}><Text style={styles.label}>Count</Text><TextInput style={styles.input} value={row.n} onChangeText={(v) => updateRow(windows, setWindows, i, 'n', v)} placeholder="1" keyboardType="numeric" /></View>
+              <Text style={styles.calcResult}>= {calcWinArea(row).toFixed(2)} m²</Text>
+              {windows.length > 1 && <TouchableOpacity onPress={() => delRow(windows, setWindows, i)} style={styles.trashBtn}><Ionicons name="trash" size={16} color="#ef4444" /></TouchableOpacity>}
+            </View>
+          </View>
+        ))}
+        <TouchableOpacity onPress={() => addRow(windows, setWindows, { w: '', h: '', n: '1' })} style={styles.addBtn}>
+          <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Window</Text>
+        </TouchableOpacity>
+        <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Window Area:</Text><Text style={styles.totalValue}>{windows.reduce((s: number, r: any) => s + calcWinArea(r), 0).toFixed(2)} m²</Text></View>
+      </View>
+
+      {/* ── Doors ────────────────────────────────────────────────────── */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Ionicons name="resize" size={20} color="#2563eb" />
-          <Text style={styles.sectionTitle}>Area Measurements</Text>
+          <Text style={styles.sectionTitle}>Doors</Text>
         </View>
-        <View style={styles.tabs}>
-          {tabs.map(tab => (
-            <TouchableOpacity key={tab} onPress={() => setActiveTab(tab as any)} style={[styles.tab, activeTab === tab && styles.activeTab]}>
-              <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab.charAt(0).toUpperCase()+tab.slice(1)}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        {activeTab === 'floor' && renderFloors()}
-        {activeTab === 'door' && renderDoors()}
-        {activeTab === 'window' && renderWindows()}
-        {activeTab === 'wall' && renderWalls()}
+        {doors.map((row: any, i: number) => (
+          <View key={i} style={styles.rowCard}>
+            <View style={styles.inputRow}>
+              <Text style={styles.rowNum}>{i+1}</Text>
+              <View style={styles.third}><Text style={styles.label}>Width</Text><TextInput style={styles.input} value={row.w} onChangeText={(v) => updateRow(doors, setDoors, i, 'w', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <View style={styles.third}><Text style={styles.label}>Height</Text><TextInput style={styles.input} value={row.h} onChangeText={(v) => updateRow(doors, setDoors, i, 'h', v)} placeholder="0.0" keyboardType="decimal-pad" /></View>
+              <View style={styles.third}><Text style={styles.label}>Count</Text><TextInput style={styles.input} value={row.n} onChangeText={(v) => updateRow(doors, setDoors, i, 'n', v)} placeholder="1" keyboardType="numeric" /></View>
+              <Text style={styles.calcResult}>= {calcDoorArea(row).toFixed(2)} m²</Text>
+              {doors.length > 1 && <TouchableOpacity onPress={() => delRow(doors, setDoors, i)} style={styles.trashBtn}><Ionicons name="trash" size={16} color="#ef4444" /></TouchableOpacity>}
+            </View>
+          </View>
+        ))}
+        <TouchableOpacity onPress={() => addRow(doors, setDoors, { w: '', h: '', n: '1' })} style={styles.addBtn}>
+          <Ionicons name="add-circle" size={20} color="#2563eb" /><Text style={styles.addBtnText}>Add Door</Text>
+        </TouchableOpacity>
+        <View style={styles.totalBox}><Text style={styles.totalLabel}>Total Door Area:</Text><Text style={styles.totalValue}>{doors.reduce((s: number, r: any) => s + calcDoorArea(r), 0).toFixed(2)} m²</Text></View>
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 
@@ -455,21 +439,15 @@ const styles = StyleSheet.create({
   photoRequirement: { fontSize: 12, color: '#9ca3af', marginTop: 10, textAlign: 'center' },
 
   // Measurements
-  tabs: { flexDirection: 'row', gap: 6, marginBottom: 16 },
-  tab: { flex: 1, paddingVertical: 8, backgroundColor: '#f3f4f6', borderRadius: 8, alignItems: 'center' },
-  activeTab: { backgroundColor: '#2563eb' },
-  tabText: { fontSize: 12, color: '#374151' },
-  activeTabText: { color: '#fff', fontWeight: '600' },
-  rowCard: { backgroundColor: '#f9fafb', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#e5e7eb' },
-  rowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  rowTitle: { fontSize: 13, color: '#6b7280', fontWeight: '600' },
-  inputRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  rowCard: { backgroundColor: '#f9fafb', borderRadius: 10, padding: 8, marginBottom: 8, borderWidth: 1, borderColor: '#e5e7eb' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowNum: { fontSize: 12, color: '#2563eb', fontWeight: '700', width: 18, textAlign: 'center' },
   half: { flex: 1 },
   third: { flex: 1 },
-  label: { fontSize: 11, color: '#6b7280', marginBottom: 4 },
-  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
-  areaBox: { backgroundColor: '#eff6ff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  areaLabel: { fontSize: 13, color: '#1e40af', fontWeight: '600' },
+  label: { fontSize: 10, color: '#6b7280', marginBottom: 3 },
+  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, fontSize: 13 },
+  calcResult: { fontSize: 12, color: '#1e40af', fontWeight: '600', minWidth: 70, textAlign: 'right' },
+  trashBtn: { padding: 4 },
   addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#f3f4f6', paddingVertical: 12, borderRadius: 12, marginBottom: 12 },
   addBtnText: { fontSize: 14, color: '#374151' },
   totalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 },

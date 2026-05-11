@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PhotoItem } from './Photos';
 
-export default function Review({ data }: any) {
+export default function Review({ data, embedded }: any) {
   const photoItems = data.photoItems as Record<string, PhotoItem[]> | undefined;
   let totalPhotos = 0, uploadedPhotos = 0, uploadingPhotos = 0;
   if (photoItems) {
@@ -14,8 +14,9 @@ export default function Review({ data }: any) {
     });
   }
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Review & Submit</Text>
 
@@ -74,7 +75,7 @@ export default function Review({ data }: any) {
           </Text>
         </View>
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 

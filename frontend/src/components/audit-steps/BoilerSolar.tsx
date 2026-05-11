@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TextInput } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 
-export default function BoilerSolar({ data, updateData }: any) {
+export default function BoilerSolar({ data, updateData, embedded }: any) {
   const [formData, setFormData] = useState({
     ariston_count: data.ariston_count || '1',
     ariston_kW: data.ariston_kW || '2',
@@ -39,8 +39,9 @@ export default function BoilerSolar({ data, updateData }: any) {
   };
   const gelio = gelioConfigs[gelioL] || gelioConfigs[200];
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
       <View style={styles.section}>
         <View style={styles.sectionHeader}><Ionicons name="water" size={20} color="#2563eb" /><Text style={styles.sectionTitle}>Ariston (Electric Boiler)</Text></View>
         <View style={styles.row}>
@@ -119,7 +120,7 @@ export default function BoilerSolar({ data, updateData }: any) {
           <View style={styles.resultRow}><Text style={styles.resultLabel}>Payback:</Text><Text style={styles.resultValue}>{(gelio.inv*1e6/gelio.som).toFixed(1)} years</Text></View>
         </View>
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 

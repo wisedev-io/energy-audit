@@ -43,7 +43,7 @@ function fromStoredLists(data: any, yr: number) {
   return emptyYear();
 }
 
-export default function EnergyConsumption({ data, updateData }: any) {
+export default function EnergyConsumption({ data, updateData, embedded }: any) {
   const [activeYear, setActiveYear] = useState(2025);
   const [y2023, setY2023] = useState(() => fromStoredLists(data, 2023));
   const [y2024, setY2024] = useState(() => fromStoredLists(data, 2024));
@@ -59,6 +59,32 @@ export default function EnergyConsumption({ data, updateData }: any) {
   useEffect(() => { y2024Ref.current = y2024; }, [y2024]);
   useEffect(() => { y2025Ref.current = y2025; }, [y2025]);
   useEffect(() => { activeYearRef.current = activeYear; }, [activeYear]);
+
+  // Keyboard navigation refs
+  const inputRefs = useRef<Record<string, any>>({});
+  const pendingFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pendingFocusRef.current) {
+      const key = pendingFocusRef.current;
+      setTimeout(() => { inputRefs.current[key]?.focus(); pendingFocusRef.current = null; }, 100);
+    }
+  }, [activeYear]);
+
+  const navigateDown = (monthIdx: number, col: 'gas' | 'elec' | 'other') => {
+    if (monthIdx < 11) {
+      inputRefs.current[`${activeYear}_${monthIdx + 1}_${col}`]?.focus();
+    } else if (activeYear < 2025) {
+      pendingFocusRef.current = `${activeYear + 1}_0_${col}`;
+      setActiveYear(activeYear + 1);
+    } else {
+      // End of 2025 December — cross to next column starting from 2023
+      const nextCol = col === 'gas' ? 'elec' : col === 'elec' ? 'other' : null;
+      if (nextCol) {
+        pendingFocusRef.current = `2023_0_${nextCol}`;
+        setActiveYear(2023);
+      }
+    }
+  };
 
   // ── Bill photos (To'lov hujjatlari) ───────────────────────────────────────
   const [billPhotos, setBillPhotos] = useState<BillPhoto[]>(() => {
@@ -367,8 +393,9 @@ export default function EnergyConsumption({ data, updateData }: any) {
     other: acc.other + (parseFloat(m.other) || 0),
   }), { gas: 0, elec: 0, other: 0 });
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
 
       {/* ── To'lov hujjatlari ─────────────────────────────────────────── */}
       <View style={styles.section}>
@@ -493,28 +520,40 @@ export default function EnergyConsumption({ data, updateData }: any) {
           <View key={month} style={[styles.monthRow, i % 2 === 0 && styles.monthRowAlt]}>
             <Text style={styles.monthLabel}>{month}</Text>
             <TextInput
+              ref={(r) => { inputRefs.current[`${activeYear}_${i}_gas`] = r; }}
               style={styles.monthInput}
               value={current[i].gas}
               onChangeText={(v) => updateMonth(i, 'gas', v)}
               placeholder="0"
               keyboardType="decimal-pad"
               selectTextOnFocus
+              returnKeyType="next"
+              onSubmitEditing={() => navigateDown(i, 'gas')}
+              {...(Platform.OS === 'web' ? { onKeyDown: (e: any) => { if (e.key === 'Tab') { e.preventDefault(); navigateDown(i, 'gas'); } } } : {})}
             />
             <TextInput
+              ref={(r) => { inputRefs.current[`${activeYear}_${i}_elec`] = r; }}
               style={styles.monthInput}
               value={current[i].elec}
               onChangeText={(v) => updateMonth(i, 'elec', v)}
               placeholder="0"
               keyboardType="decimal-pad"
               selectTextOnFocus
+              returnKeyType="next"
+              onSubmitEditing={() => navigateDown(i, 'elec')}
+              {...(Platform.OS === 'web' ? { onKeyDown: (e: any) => { if (e.key === 'Tab') { e.preventDefault(); navigateDown(i, 'elec'); } } } : {})}
             />
             <TextInput
+              ref={(r) => { inputRefs.current[`${activeYear}_${i}_other`] = r; }}
               style={styles.monthInput}
               value={current[i].other}
               onChangeText={(v) => updateMonth(i, 'other', v)}
               placeholder="0"
               keyboardType="decimal-pad"
               selectTextOnFocus
+              returnKeyType="next"
+              onSubmitEditing={() => navigateDown(i, 'other')}
+              {...(Platform.OS === 'web' ? { onKeyDown: (e: any) => { if (e.key === 'Tab') { e.preventDefault(); navigateDown(i, 'other'); } } } : {})}
             />
           </View>
         ))}
@@ -528,7 +567,7 @@ export default function EnergyConsumption({ data, updateData }: any) {
           </View>
         </View>
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 
