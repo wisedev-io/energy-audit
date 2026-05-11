@@ -2,6 +2,17 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Deploy to Server",
+      "type": "shell",
+      "command": "~/energy-audit/deploy.sh",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Start Dev",
       "dependsOn": ["Start Backend", "Start Frontend"],
       "group": {
