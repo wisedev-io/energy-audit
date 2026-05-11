@@ -281,21 +281,37 @@ export default function Photos({ data, updateData, embedded }: any) {
     processQueueRef.current = processQueue;
   }, [processQueue]);
 
-  // Re-upload any locally-added photos that lost their server key (e.g. after a hot-reload).
+  // On mount: re-enqueue any locally-added photos that lost their server key (e.g. hot-reload
+  // or draft restore). Also reset items stuck with uploading:true but no running XHR (happens
+  // when a draft was saved mid-upload and then restored).
   // Skip photos marked isExisting — those are already in the DB and don't need re-uploading.
   useEffect(() => {
-    const items = { ...photoItems };
     let changed = false;
-    for (const [sec, list] of Object.entries(items)) {
+    const resetItems: Record<string, PhotoItem[]> = {};
+    for (const [sec, list] of Object.entries(photoItems)) {
       list.forEach((item) => {
-        if (!item.serverKey && !item.uploading && !item.isExisting && item.uri) {
+        if (item.serverKey || item.isExisting) return;
+        if (!item.uri) return;
+        const xhrKey = `${sec}_${item.id}`;
+        const isActuallyUploading = item.uploading && !!xhrRefs.current[xhrKey];
+        if (!isActuallyUploading) {
           changed = true;
-          pendingQueue.current.push({ sectionId: sec, item });
+          const normalizedItem = item.uploading
+            ? { ...item, uploading: false, progress: 0 }
+            : item;
+          if (item.uploading) {
+            if (!resetItems[sec]) resetItems[sec] = [...list];
+            const idx = resetItems[sec].findIndex(p => p.id === item.id);
+            if (idx >= 0) resetItems[sec][idx] = normalizedItem;
+          }
+          pendingQueue.current.push({ sectionId: sec, item: normalizedItem });
         }
       });
     }
     if (changed) {
-      setPhotoItems({ ...items });
+      if (Object.keys(resetItems).length > 0) {
+        setPhotoItems(prev => ({ ...prev, ...resetItems }));
+      }
       processQueue();
     }
   }, []); // only on mount
@@ -337,42 +353,34 @@ export default function Photos({ data, updateData, embedded }: any) {
       })
     );
 
+    // Build new items BEFORE calling setPhotoItems so we can reference them outside
+    const uploadUri = (ca: typeof compressedAssets[0]) =>
+      ca.isWebHeicPlaceholder ? ca.originalUri : ca.compressed.uri;
+    const newItems: PhotoItem[] = compressedAssets.map(ca => ({
+      id: makeId(),
+      uri: Platform.OS !== 'web' ? ca.compressed.uri : ca.displayUri,
+      fileName: ca.compressed.fileName,
+      mimeType: ca.compressed.mimeType,
+      progress: 0,
+      uploading: false,
+      totalBytes: 0,
+      loadedBytes: 0,
+      _originalUri: uploadUri(ca),
+    } as PhotoItem & { _originalUri?: string }));
+
+    // Pure state update — no side effects inside the updater
     setPhotoItems(prev => {
       const existing = prev[sectionId] || [];
-      const newItems: PhotoItem[] = compressedAssets.map(ca => {
-        // On native: display and upload from the compressed URI
-        // On web HEIC: display SVG placeholder, upload from originalUri (web browser handles HEIC→JPEG)
-        // On web non-HEIC: display and upload from the compressed URI (or blob: URI)
-        const uploadUri = ca.isWebHeicPlaceholder ? ca.originalUri : ca.compressed.uri;
-        return {
-          id: makeId(),
-          uri: ca.displayUri,        // What to show in the image thumbnail
-          fileName: ca.compressed.fileName,
-          mimeType: ca.compressed.mimeType,
-          progress: 0,
-          uploading: false,
-          totalBytes: 0,
-          loadedBytes: 0,
-          // On web, doXHRUpload fetches _originalUri (or item.uri) via blob fetch
-          // Pass the correct upload URI so doXHRUpload uses it
-          _originalUri: ca.isWebHeicPlaceholder ? ca.originalUri : uploadUri,
-          // Override display uri with compressed uri for native display
-          ...(Platform.OS !== 'web' ? { uri: ca.compressed.uri } : {}),
-        } as PhotoItem & { _originalUri?: string };
-      });
-
       const updated = { ...prev, [sectionId]: [...existing, ...newItems] };
       notifyParent(updated);
-
-      // Enqueue each new item for upload
-      newItems.forEach(item => {
-        pendingQueue.current.push({ sectionId, item });
-      });
-      // Call processQueue after enqueueing via a microtask to let state settle
-      setTimeout(() => processQueue(), 0);
-
       return updated;
     });
+
+    // Enqueue and trigger outside the updater so they run exactly once
+    newItems.forEach(item => {
+      pendingQueue.current.push({ sectionId, item });
+    });
+    setTimeout(() => processQueue(), 0);
   };
 
   const removePhoto = (sectionId: string, itemId: string) => {
@@ -409,14 +417,16 @@ export default function Photos({ data, updateData, embedded }: any) {
 
   const currentItems = photoItems[activeSection] || [];
   const currentSection = photoSections.find(s => s.id === activeSection);
-  const uploadingCount = Object.values(photoItems).flat().filter(p => p.uploading).length;
-  const totalCount = Object.values(photoItems).flat().length;
-  const doneCount = Object.values(photoItems).flat().filter(p => !!p.serverKey).length;
+  const allFlat = Object.values(photoItems).flat();
+  const uploadingCount = allFlat.filter(p => p.uploading).length;
+  const pendingCount = allFlat.filter(p => !p.serverKey && !p.isExisting && !p.uploading && !p.error).length;
+  const totalCount = allFlat.length;
+  const doneCount = allFlat.filter(p => !!p.serverKey || !!p.isExisting).length;
 
   const Wrapper: any = embedded ? View : ScrollView;
   return (
     <Wrapper style={styles.container}>
-      {uploadingCount > 0 && (
+      {(uploadingCount > 0 || pendingCount > 0) && (
         <View style={styles.globalProgress}>
           <ActivityIndicator size="small" color="#2563eb" />
           <Text style={styles.globalProgressText}>Uploading {doneCount} / {totalCount}</Text>
@@ -432,7 +442,7 @@ export default function Photos({ data, updateData, embedded }: any) {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sectionTabs}>
           {photoSections.map(s => {
             const items = photoItems[s.id] || [];
-            const done = items.filter(p => !!p.serverKey).length;
+            const done = items.filter(p => !!p.serverKey || !!p.isExisting).length;
             const uploading = items.filter(p => p.uploading).length;
             return (
               <TouchableOpacity
@@ -483,10 +493,14 @@ export default function Photos({ data, updateData, embedded }: any) {
                 </View>
               )}
 
-              {/* Done indicator */}
-              {item.serverKey && !item.uploading && (
+              {/* Done / saved indicator */}
+              {(item.serverKey || item.isExisting) && !item.uploading && (
                 <View style={styles.doneIndicator}>
-                  <Ionicons name="checkmark-circle" size={18} color="#10b981" />
+                  <Ionicons
+                    name={item.isExisting && !item.serverKey ? 'cloud-done-outline' : 'checkmark-circle'}
+                    size={18}
+                    color={item.isExisting && !item.serverKey ? '#6366f1' : '#10b981'}
+                  />
                 </View>
               )}
 

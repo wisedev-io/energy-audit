@@ -340,9 +340,12 @@ export default function NewAuditScreen({ navigation, route }: any) {
 
     const photoItems = formData.photoItems as Record<string, any[]> | undefined;
     if (photoItems) {
-      const uploading = Object.values(photoItems).flat().filter((p: any) => p.uploading);
-      if (uploading.length > 0) {
-        setSubmitError(`${uploading.length} photo(s) are still uploading. Please wait.`);
+      const allPhotos = Object.values(photoItems).flat();
+      const notReady = allPhotos.filter((p: any) =>
+        !p.serverKey && !p.isExisting && !p.error
+      );
+      if (notReady.length > 0) {
+        setSubmitError(`${notReady.length} photo(s) are still uploading. Please wait.`);
         return;
       }
     }
