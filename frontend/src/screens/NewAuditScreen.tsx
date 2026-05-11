@@ -37,17 +37,17 @@ const steps = [
   { id: 10, name: 'Review',       component: Review },
 ];
 
-const STEP_META: Record<number, { photoId: string; subtitle: string; bg: string }> = {
-  1:  { photoId: 'Tm3euR9N7Z4', subtitle: 'Project & contact details',      bg: 'rgba(26,86,219,0.04)'   },
-  2:  { photoId: 'fxTYHz1RG10', subtitle: 'Structure & materials',          bg: 'rgba(6,148,162,0.04)'   },
-  3:  { photoId: 'Z6GxeYUzG_s', subtitle: 'Heating, cooling & ventilation', bg: 'rgba(126,58,242,0.04)'  },
-  4:  { photoId: 'j6QSUeiW6vo', subtitle: 'Power-consuming devices',        bg: 'rgba(225,29,72,0.04)'   },
-  5:  { photoId: 'c-FCf51PzaQ', subtitle: 'Floor plan & openings',          bg: 'rgba(8,145,178,0.04)'   },
-  6:  { photoId: 'eBTXgMCEc9o', subtitle: 'Gas, electricity & other fuels', bg: 'rgba(234,88,12,0.04)'   },
-  7:  { photoId: 'XGAZzyLzn18', subtitle: 'Boiler units & photovoltaic',    bg: 'rgba(217,119,6,0.04)'   },
-  8:  { photoId: 'A2s88COmrPI', subtitle: 'Temperature, humidity & light',  bg: 'rgba(67,56,202,0.04)'   },
-  9:  { photoId: 'qOyo8O9dH-w', subtitle: 'Site documentation',             bg: 'rgba(55,65,81,0.04)'    },
-  10: { photoId: 'QI6NLgN5XnM', subtitle: 'Verify & submit',                bg: 'rgba(5,150,105,0.04)'   },
+const STEP_META: Record<number, { image: ReturnType<typeof require>; subtitle: string; bg: string }> = {
+  1:  { image: require('../../assets/Screenshot 2026-05-11 at 15.25.18.png'), subtitle: 'Project & contact details',      bg: 'rgba(26,86,219,0.04)'   },
+  2:  { image: require('../../assets/356541406.jpeg'),                         subtitle: 'Structure & materials',          bg: 'rgba(6,148,162,0.04)'   },
+  3:  { image: require('../../assets/Screenshot 2026-05-11 at 15.26.19.png'), subtitle: 'Heating, cooling & ventilation', bg: 'rgba(126,58,242,0.04)'  },
+  4:  { image: require('../../assets/istockphoto-1174598609-1024x1024.jpg'),  subtitle: 'Power-consuming devices',        bg: 'rgba(225,29,72,0.04)'   },
+  5:  { image: require('../../assets/istockphoto-1352877493-1024x1024.jpg'),  subtitle: 'Floor plan & openings',          bg: 'rgba(8,145,178,0.04)'   },
+  6:  { image: require('../../assets/istockphoto-931173784-1024x1024.jpg'),   subtitle: 'Gas, electricity & other fuels', bg: 'rgba(234,88,12,0.04)'   },
+  7:  { image: require('../../assets/solar_.jpg'),                             subtitle: 'Boiler units & photovoltaic',    bg: 'rgba(217,119,6,0.04)'   },
+  8:  { image: require('../../assets/Screenshot 2026-05-11 at 17.05.27.png'), subtitle: 'Temperature, humidity & light',  bg: 'rgba(67,56,202,0.04)'   },
+  9:  { image: require('../../assets/images.jpeg'),                            subtitle: 'Site documentation',             bg: 'rgba(55,65,81,0.04)'    },
+  10: { image: require('../../assets/five-star-customer-feedback-form-filled-positive-review-comments-coffee-glasses-wooden-table-representing-373527072.webp'), subtitle: 'Verify & submit', bg: 'rgba(5,150,105,0.04)' },
 };
 
 function buildDefaults(caseNumber?: string): Record<string, any> {
@@ -717,7 +717,7 @@ export default function NewAuditScreen({ navigation, route }: any) {
               >
                 {/* Photo fill */}
                 <Image
-                  source={{ uri: `https://images.unsplash.com/photo-${meta.photoId}?w=800&h=180&fit=crop&auto=format&q=80` }}
+                  source={meta.image}
                   style={styles.bannerImage}
                   resizeMode="cover"
                 />

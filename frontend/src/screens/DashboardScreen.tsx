@@ -81,7 +81,7 @@ export default function DashboardScreen({ navigation }: any) {
       <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
         <View style={styles.headerContent}>
           <View>
-            <Image source={require('../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+            <Image source={require('../../assets/logo-ea.png')} style={styles.logo} resizeMode="contain" />
             <Text style={styles.headerSub}>Energy Assessment</Text>
           </View>
         </View>
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  logo: { width: 140, height: 38 },
+  logo: { width: 46, height: 46 },
   headerSub: { fontSize: 11, color: Colors.textMuted, marginTop: 2, fontWeight: '500' },
 
   scroll: { flex: 1 },
