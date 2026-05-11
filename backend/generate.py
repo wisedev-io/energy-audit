@@ -28,6 +28,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from calculate import (
     MONTHS, calc_all, calc_areas, calc_ariston, calc_efficiency,
     fes_values, gelio_values,
+    CO2_PER_KWH, CO2_GAS_PER_M3, GAS_KWH,
 )
 from storage import BinaryUpload, get_storage, guess_mimetype
 
@@ -188,18 +189,38 @@ def write_excel(data, energy, areas, out_path):
 # ── Word helpers ───────────────────────────────────────────────────────────
 
 def _replace_in_para(para, variables):
-    """Replace {{key}} placeholders, skipping runs that contain images."""
+    """Replace {{key}} placeholders, preserving per-run formatting (superscript etc.).
+
+    Strategy: replace within each run individually first — this covers the common
+    case where a placeholder is fully inside one run, leaving adjacent superscript/
+    subscript runs untouched.  Only fall back to the flatten-all-runs approach when
+    a placeholder still spans run boundaries after the per-run pass.
+    """
     full = ''.join(r.text for r in para.runs)
     if '{{' not in full:
         return
-    for key, val in variables.items():
-        full = full.replace('{{' + key + '}}', str(val))
-    # Only touch runs that have no drawing/image content
+
+    # Pass 1 — per-run replacement (preserves all run-level formatting)
     text_runs = [r for r in para.runs
                  if '<w:drawing' not in r._element.xml and '<v:' not in r._element.xml]
+    for run in text_runs:
+        if '{{' in run.text:
+            new_text = run.text
+            for key, val in variables.items():
+                new_text = new_text.replace('{{' + key + '}}', str(val))
+            run.text = new_text
+
+    # Pass 2 — check whether any cross-run placeholders remain
+    full2 = ''.join(r.text for r in para.runs)
+    if '{{' not in full2:
+        return
+
+    # Fallback: flatten into first text run (loses per-run formatting in this para)
+    for key, val in variables.items():
+        full2 = full2.replace('{{' + key + '}}', str(val))
     if not text_runs:
         return
-    text_runs[0].text = full
+    text_runs[0].text = full2
     for r in text_runs[1:]:
         r.text = ''
 
@@ -432,10 +453,20 @@ def _fill_energy_table(table, rows, summary, year):
                     return
 
     _fill_between(14, 'JAMI yillik',  'kW',     int(summary['total_kwh']), bold=True)
-    _fill_between(15, 'Ulushi',       'gaz',    f"{summary['pct_gas']}%",   bold=True)
-    _fill_between(15, 'gaz',          'elektr', f"{summary['pct_elec']}%",  bold=True)
-    _fill_between(15, 'elektr',       'boshqa', f"{summary['pct_other']}%", bold=True)
-    _fill_between(16, 'Yillik',       'mln',    f"{summary['total_mln']:.4f}", bold=True)
+    _fill_between(15, 'Ulushi',       'gaz',    _pct(summary['pct_gas']),   bold=True)
+    _fill_between(15, 'gaz',          'elektr', _pct(summary['pct_elec']),  bold=True)
+    _fill_between(15, 'elektr',       'boshqa', _pct(summary['pct_other']), bold=True)
+    _fill_between(16, 'Yillik',       'mln',    f"{summary['total_mln']:.3f}", bold=True)
+
+
+def _pct(v):
+    """Format a percentage value: clean -0.0 and drop unnecessary decimals."""
+    v = round(float(v), 1)
+    if v == 0:
+        return "0%"
+    if v == int(v):
+        return f"{int(v)}%"
+    return f"{v}%"
 
 
 def _fill_comparison_table(table, energy):
@@ -463,10 +494,10 @@ def _fill_comparison_table(table, energy):
         ri = i + 1
         sc(ri, 0, f"{year}-yil")
         sc(ri, 1, int(s['total_kwh']))
-        sc(ri, 2, f"{s['pct_elec']}%")
-        sc(ri, 3, f"{s['pct_gas']}%")
-        sc(ri, 4, f"{s['pct_other']}%")
-        sc(ri, 5, f"{s['total_mln']:.4f}")
+        sc(ri, 2, _pct(s['pct_elec']))
+        sc(ri, 3, _pct(s['pct_gas']))
+        sc(ri, 4, _pct(s['pct_other']))
+        sc(ri, 5, f"{s['total_mln']:.3f}")
         sc(ri, 6, int(s['total_elec']))
         sc(ri, 7, int(s['total_gkwh']))
 
@@ -476,16 +507,16 @@ def _fill_comparison_table(table, energy):
         s23 = energy[2023]['summary']
         s24 = energy[2024]['summary']
         sc(ri, 1, int(s23[kwh_keys[j]]))
-        sc(ri, 2, f"{s23[pct_keys[j]]}%")
+        sc(ri, 2, _pct(s23[pct_keys[j]]))
         sc(ri, 5, int(s24[kwh_keys[j]]))
-        sc(ri, 6, f"{s24[pct_keys[j]]}%")
+        sc(ri, 6, _pct(s24[pct_keys[j]]))
 
     # Rows 13-15: 2025 pie data cols 1-2, jami xarajat col 5
     for j in range(3):
         ri = 13 + j
         s25 = energy[2025]['summary']
         sc(ri, 1, int(s25[kwh_keys[j]]))
-        sc(ri, 2, f"{s25[pct_keys[j]]}%")
+        sc(ri, 2, _pct(s25[pct_keys[j]]))
 
     cost_years = [(13, 2023), (14, 2024), (15, 2025)]
     for ri, year in cost_years:
@@ -941,7 +972,7 @@ def build_variables(data, energy, areas, case_no):
     _fes_som   = fv['fes_som']
     _fes_payb  = fv['fes_payb']
     fes_payb_formula = (
-        f"T = {_fes_mln} mln. soʻm ÷ {_fes_som:,.0f} soʻm = {_fes_payb}"
+        f"P = I / B = {int(round(_fes_mln))} mln. soʻm ÷ {_fes_som:,.0f} soʻm = {_fes_payb}"
     )
 
     s23 = energy[2023]['summary']
@@ -983,8 +1014,31 @@ def build_variables(data, energy, areas, case_no):
     ar_kW_oy_c   = round(ar['month'] * _ar_rate)
     ar_kW_year_c = round(ar['year']  * _ar_rate)
 
-    # CO2 total for 2025 (tonnes)
-    co2_tot = round(s25['total_elec'] * 0.5 / 1000, 2)
+    # CO2 for 2025: electricity + gas combined (tonnes)
+    co2_tot = round(
+        s25['total_elec'] * CO2_PER_KWH / 1000 +
+        s25['total_gas']  * CO2_GAS_PER_M3 / 1000,
+        2
+    )
+    # CO2 after installations: FES reduces electricity, gelio reduces gas
+    _reduced_elec = max(0.0, s25['total_elec'] - fv['fes_kWh'])
+    _reduced_gas  = max(0.0, s25['total_gas']  - gv['gelio_kwh'] / GAS_KWH)
+    co2_tot_new = round(
+        _reduced_elec * CO2_PER_KWH / 1000 +
+        _reduced_gas  * CO2_GAS_PER_M3 / 1000,
+        2
+    )
+
+    # Target consumption: 20 % below qov_fakt, rounded to nearest 25
+    _qov_raw = float(eff['qov_fakt'])
+    _qov_to  = round(_qov_raw * 0.80 / 25) * 25
+    qov_to   = max(50, min(_qov_to, int(_qov_raw) - 1))
+
+    # Projected cost after FES + geliokollector savings
+    _new_elec_cost  = max(0.0, s25['total_elec_cost']  - fv['fes_som'])
+    _new_gas_cost   = max(0.0, s25['total_gas_cost']   - gv['gelio_som'])
+    _new_total_cost = _new_elec_cost + _new_gas_cost + s25['total_other_cost']
+    e_to_mln = max(0.0, round(_new_total_cost / 1e6, 3))
 
     v = {
         # Case metadata
@@ -1048,8 +1102,9 @@ def build_variables(data, energy, areas, case_no):
 
         # FES solar
         **fv,
+        'fes_mln':      int(round(fv['fes_mln'])),
         'grid':         grid,
-        'fes_inv':      fv['fes_mln'],
+        'fes_inv':      int(round(fv['fes_mln'])),
         'fes_kwh':      fv['fes_kWh'],  # lowercase alias
         'fes_payb':     fes_payb_formula,
         'batareyasi,':  batareyasi_text,
@@ -1065,12 +1120,12 @@ def build_variables(data, energy, areas, case_no):
         'gas_95':       eff['gas_95'],
         'gas_heat':     eff['gas_heat'],
         'qov_fakt':     eff['qov_fakt'],
-        'qov_to':       eff['qov_fakt'],    # alias
+        'qov_to':       qov_to,
         'qov_fakt_val': eff['qov_fakt'],
         'ec_diff':      eff['ec_diff'],
         'ec_diff_percent': eff['ec_pct'],
-        'e_from_mln':   round(s23['total_mln'], 2),
-        'e_to_mln':     round(s25['total_mln'], 2),
+        'e_from_mln':   round(s25['total_mln'], 3),
+        'e_to_mln':     e_to_mln,
 
         # Room measurements: r1/r2 from form, r3/r4 auto-varied ±5 / ±25
         **_room_vars(data),
@@ -1087,6 +1142,9 @@ def build_variables(data, energy, areas, case_no):
         'win_layers':   data.get('win_layers', ''),
         'wall_insul':   data.get('wall_insul', ''),
         'door_mat':     data.get('door_mat', ''),
+
+        # Thermal / electrical box heating status
+        'qutilarda_qizish_mavju_emas': data.get('qutilarda_qizish_mavju_emas', 'Qutilarda qizish mavjud emas'),
 
         # Engineering systems (ventilation, water, cooling)
         'vent_desc':    data.get('vent_desc', ''),
@@ -1111,16 +1169,17 @@ def build_variables(data, energy, areas, case_no):
         'e25_sum':      int(s25['total_elec']),
         '2025_kW':      int(s25['total_elec']),
 
-        # Energy cost breakdowns
-        'gk23_sum':     int(s23['total_gas_cost']),
-        'gk24_sum':     int(s24['total_gas_cost']),
-        'gk25_sum':     int(s25['total_gas_cost']),
-        'tk23_sum':     int(s23['total_cost']),
-        'tk24_sum':     int(s24['total_cost']),
-        'tk25_sum':     int(s25['total_cost']),
-        'e23_mln':      round(s23['total_elec_cost'] / 1e6, 3),
-        'e24_mln':      round(s24['total_elec_cost'] / 1e6, 3),
-        'e25_mln':      round(s25['total_elec_cost'] / 1e6, 3),
+        # Energy kWh totals for passport table (issiqlik = gas kWh, umumiy = total kWh)
+        'gk23_sum':     int(round(s23['total_gkwh'])),
+        'gk24_sum':     int(round(s24['total_gkwh'])),
+        'gk25_sum':     int(round(s25['total_gkwh'])),
+        'tk23_sum':     int(round(s23['total_kwh'])),
+        'tk24_sum':     int(round(s24['total_kwh'])),
+        'tk25_sum':     int(round(s25['total_kwh'])),
+        # Total energy cost in mln so'm (all carriers, not electricity only)
+        'e23_mln':      round(s23['total_mln'], 3),
+        'e24_mln':      round(s24['total_mln'], 3),
+        'e25_mln':      round(s25['total_mln'], 3),
 
         # Appliances
         'apl_total':    f"{round(apl_total_kwh, 1):.1f}",
@@ -1133,6 +1192,7 @@ def build_variables(data, energy, areas, case_no):
         # Efficiency & CO2
         'ec_class':     ec_class,
         'co2_tot':      co2_tot,
+        'co2_tot_new':  co2_tot_new,
 
         # FES panel area
         'fes_m2':       fes_m2,

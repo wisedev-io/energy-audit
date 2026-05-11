@@ -8,7 +8,8 @@ MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun',
 
 GAS_KWH = 9.5      # 1 m³ natural gas = 9.5 kWh
 OTHER_KWH = 6.98   # 1 kg other fuel = 6.98 kWh
-CO2_PER_KWH = 0.5  # kg CO₂ per kWh electricity (Uzbekistan grid)
+CO2_PER_KWH = 0.5   # kg CO₂ per kWh electricity (Uzbekistan grid)
+CO2_GAS_PER_M3 = 2.0  # kg CO₂ per m³ natural gas combustion
 
 # FES (Solar PV) lookup: kW → (annual_kWh, investment_mln, payback_str)
 FES_TABLE = {

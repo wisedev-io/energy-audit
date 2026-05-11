@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Platform, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -22,6 +22,9 @@ function makeId() { return `${Date.now()}_${Math.random().toString(36).slice(2)}
 function fmtBytes(b: number) { return b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`; }
 
 export default function Measurements({ data, updateData, embedded }: any) {
+  const QIZISH_OFF = 'Qutilarda qizish mavjud emas';
+  const QIZISH_ON  = 'Elektr qutilarda qizish mavjud';
+
   const [formData, setFormData] = useState({
     r1_temp: data.r1_temp || '',
     r1_hum: data.r1_hum || '',
@@ -30,6 +33,7 @@ export default function Measurements({ data, updateData, embedded }: any) {
     r2_hum: data.r2_hum || '',
     r2_lux: data.r2_lux || '',
     u1_temp: data.u1_temp || '21',
+    qutilarda_qizish_mavju_emas: data.qutilarda_qizish_mavju_emas || QIZISH_OFF,
   });
 
   const handleChange = (field: string, value: string) => {
@@ -361,6 +365,26 @@ export default function Measurements({ data, updateData, embedded }: any) {
         </View>
       </View>
 
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="flash" size={20} color="#f59e0b" />
+          <Text style={styles.sectionTitle}>Qutilarda qizish holati</Text>
+        </View>
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>
+            {formData.qutilarda_qizish_mavju_emas}
+          </Text>
+          <Switch
+            value={formData.qutilarda_qizish_mavju_emas === QIZISH_ON}
+            onValueChange={(v) =>
+              handleChange('qutilarda_qizish_mavju_emas', v ? QIZISH_ON : QIZISH_OFF)
+            }
+            trackColor={{ false: '#e5e7eb', true: '#fbbf24' }}
+            thumbColor={formData.qutilarda_qizish_mavju_emas === QIZISH_ON ? '#f59e0b' : '#9ca3af'}
+          />
+        </View>
+      </View>
+
       {renderPhotoSection('th', 'Harorat & Namlik rasmlari', 'thermometer')}
       {renderPhotoSection('lux', "Yorug'lik o'lchovi rasmlari", 'sunny')}
     </Wrapper>
@@ -396,4 +420,6 @@ const styles = StyleSheet.create({
   addBtnsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   addPhotoBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#eff6ff', borderWidth: 2, borderColor: '#bfdbfe', borderStyle: 'dashed', borderRadius: 12, paddingVertical: 14 },
   addPhotoBtnText: { fontSize: 14, color: '#2563eb', fontWeight: '600' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 },
+  toggleLabel: { fontSize: 14, color: '#111827', flex: 1, marginRight: 12 },
 });
