@@ -89,35 +89,6 @@ function reconstructStructuredArrays(raw: any): any {
   return r;
 }
 
-const SEC_ID_TO_SECTION: Record<number, string> = {
-  1: 'exterior', 2: 'windows', 3: 'floorplan',
-  4: 'heating',  5: 'cooling', 6: 'appliances',
-  7: 'bills',    8: 'temphum', 9: 'lux', 10: 'thermal',
-};
-
-function reconstructPhotoItems(
-  photos: { sec_id: number; slot_no: number; filename: string }[],
-  caseName: string,
-): Record<string, any[]> {
-  const items: Record<string, any[]> = {};
-  for (const p of photos) {
-    const sectionId = SEC_ID_TO_SECTION[p.sec_id];
-    if (!sectionId) continue;
-    if (!items[sectionId]) items[sectionId] = [];
-    items[sectionId].push({
-      id: `existing_${p.sec_id}_${p.slot_no}`,
-      uri: `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${p.sec_id}/${p.slot_no}`,
-      fileName: p.filename,
-      serverKey: undefined,   // no temp key; backend reuses existing photos on edit
-      isExisting: true,       // prevents re-upload on Photos component mount
-      progress: 100,
-      uploading: false,
-      totalBytes: 0,
-      loadedBytes: 0,
-    });
-  }
-  return items;
-}
 
 function getCaseNo(caseName: string): string {
   return caseName?.match(/EA-(\d+)/)?.[1] || caseName;
@@ -216,16 +187,11 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
       const raw = await res.json();
       if (raw.error) { Alert.alert('Error', raw.error); return; }
 
-      const photoList: { sec_id: number; slot_no: number; filename: string }[] = raw._photos || [];
-      delete raw._photos;
-
       let editData = reconstructEnergyArrays(raw);
       editData = reconstructStructuredArrays(editData);
       editData.edit_case = caseName;
-
-      if (photoList.length) {
-        editData.photoItems = reconstructPhotoItems(photoList, caseName);
-      }
+      editData._caseName = caseName;
+      // _photos stays in editData so Photos component can load existing photos on mount
 
       navigation.navigate('Editor', { editData, editCaseName: caseName });
     } catch (err: any) {

@@ -15,11 +15,14 @@ import BoilerSolar from '../components/audit-steps/BoilerSolar';
 import Measurements from '../components/audit-steps/Measurements';
 import Photos from '../components/audit-steps/Photos';
 import Review from '../components/audit-steps/Review';
-import { SECTION_SEC_ID } from '../components/audit-steps/Photos';
 import { draftStorage, AuditDraft } from '../utils/draftStorage';
 import DraftsScreen from './DraftsScreen';
 
 const BASE_URL = 'http://157.180.28.98:5050';
+
+function generateSessionId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
 
 const steps = [
   { id: 1,  name: 'Basic Info',   component: BasicInfo },
@@ -157,6 +160,13 @@ export default function NewAuditScreen({ navigation, route }: any) {
       }
     }, 350);
     return () => clearTimeout(t);
+  }, [isStarted]);
+
+  // Ensure every active audit has a session_id for photo uploads
+  useEffect(() => {
+    if (isStarted && !formData.session_id) {
+      setFormData((prev: any) => ({ ...prev, session_id: generateSessionId() }));
+    }
   }, [isStarted]);
 
   // Handle edit mode from History
@@ -338,16 +348,9 @@ export default function NewAuditScreen({ navigation, route }: any) {
   const handleSubmit = async () => {
     setSubmitError('');
 
-    const photoItems = formData.photoItems as Record<string, any[]> | undefined;
-    if (photoItems) {
-      const allPhotos = Object.values(photoItems).flat();
-      const notReady = allPhotos.filter((p: any) =>
-        !p.serverKey && !p.isExisting && !p.error
-      );
-      if (notReady.length > 0) {
-        setSubmitError(`${notReady.length} photo(s) are still uploading. Please wait.`);
-        return;
-      }
+    if (formData.photosUploading) {
+      setSubmitError('Photos are still uploading. Please wait.');
+      return;
     }
 
     setIsSubmitting(true);
@@ -362,7 +365,7 @@ export default function NewAuditScreen({ navigation, route }: any) {
     try {
       const fd = new FormData();
 
-      const skip = ['appliances_list', 'floors_list', 'doors_list', 'windows_list', 'walls_list', 'y2023', 'y2024', 'y2025', 'photos', 'photoItems'];
+      const skip = ['appliances_list', 'floors_list', 'doors_list', 'windows_list', 'walls_list', 'y2023', 'y2024', 'y2025', 'photos', 'photoItems', '_caseName', '_photos', 'photosUploading'];
       Object.entries(formData).forEach(([key, value]) => {
         if (!skip.includes(key) && value !== undefined && value !== null && typeof value !== 'object') {
           fd.append(key, String(value));
@@ -390,21 +393,8 @@ export default function NewAuditScreen({ navigation, route }: any) {
         }
       });
 
-      let photoCount = 0;
-      if (photoItems) {
-        for (const [sectionId, items] of Object.entries(photoItems)) {
-          const secId = SECTION_SEC_ID[sectionId];
-          if (!secId) continue;
-          items.forEach((item: any, idx: number) => {
-            if (item.serverKey) {
-              fd.append(`photo_key_s${secId}_${idx + 1}`, item.serverKey);
-              photoCount++;
-            }
-          });
-        }
-      }
-
-      setSubmitProgress(`Generating reports with ${photoCount} photo(s)…`);
+      // Photos are already on the server (session_id is in fd via the generic loop above)
+      setSubmitProgress('Generating reports…');
 
       const token = tokenRef.current || await AsyncStorage.getItem('auth_token') || '';
 

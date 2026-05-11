@@ -109,6 +109,21 @@ class PostgresStorage:
             """,
             "CREATE INDEX IF NOT EXISTS idx_case_files_case_id ON case_files(case_id)",
             "CREATE INDEX IF NOT EXISTS idx_case_photos_case_id ON case_photos(case_id)",
+            """
+            CREATE TABLE IF NOT EXISTS session_photos (
+                id BIGSERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                sec_id INTEGER NOT NULL,
+                slot_no INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                content BYTEA NOT NULL,
+                size_bytes BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (session_id, sec_id, slot_no)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_session_photos_session_id ON session_photos(session_id)",
         ]
 
         with self._connect() as conn:
@@ -424,6 +439,140 @@ class PostgresStorage:
             for row in rows
         }
 
+
+    # ── Session photos (new audit) ─────────────────────────────────────────
+
+    def save_session_photo(self, session_id: str, sec_id: int, data: bytes, mime: str, filename: str) -> int:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(slot_no), -1) + 1 AS next_slot
+                    FROM session_photos WHERE session_id = %s AND sec_id = %s
+                    """,
+                    (session_id, sec_id),
+                )
+                slot_no = cur.fetchone()["next_slot"]
+                cur.execute(
+                    """
+                    INSERT INTO session_photos (session_id, sec_id, slot_no, filename, mime_type, content, size_bytes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (session_id, sec_id, slot_no) DO UPDATE
+                    SET filename = EXCLUDED.filename, mime_type = EXCLUDED.mime_type,
+                        content = EXCLUDED.content, size_bytes = EXCLUDED.size_bytes
+                    RETURNING slot_no
+                    """,
+                    (session_id, sec_id, slot_no, filename, mime, data, len(data)),
+                )
+                slot_no = cur.fetchone()["slot_no"]
+            conn.commit()
+        return slot_no
+
+    def delete_session_photo(self, session_id: str, sec_id: int, slot_no: int) -> bool:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM session_photos WHERE session_id=%s AND sec_id=%s AND slot_no=%s RETURNING id",
+                    (session_id, sec_id, slot_no),
+                )
+                deleted = cur.fetchone()
+            conn.commit()
+        return deleted is not None
+
+    def get_session_photo(self, session_id: str, sec_id: int, slot_no: int):
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT filename, mime_type, content FROM session_photos WHERE session_id=%s AND sec_id=%s AND slot_no=%s",
+                    (session_id, sec_id, slot_no),
+                )
+                return cur.fetchone()
+
+    def list_session_photos(self, session_id: str) -> list:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT sec_id, slot_no, filename, mime_type FROM session_photos WHERE session_id=%s ORDER BY sec_id, slot_no",
+                    (session_id,),
+                )
+                return cur.fetchall()
+
+    def get_all_session_photos(self, session_id: str) -> dict:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT sec_id, slot_no, filename, mime_type, content FROM session_photos WHERE session_id=%s ORDER BY sec_id, slot_no",
+                    (session_id,),
+                )
+                rows = cur.fetchall()
+        return {
+            (r["sec_id"], r["slot_no"]): BinaryUpload(filename=r["filename"], content=r["content"], mimetype=r["mime_type"])
+            for r in rows
+        }
+
+    def delete_session(self, session_id: str) -> None:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM session_photos WHERE session_id=%s", (session_id,))
+            conn.commit()
+
+    # ── Case photos (edit mode direct upload / delete) ─────────────────────
+
+    def save_case_photo(self, case_name: str, sec_id: int, data: bytes, mime: str, filename: str) -> int:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM cases WHERE case_name=%s", (case_name,))
+                row = cur.fetchone()
+                if not row:
+                    raise StorageError(f"Case '{case_name}' not found")
+                case_id = row["id"]
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(slot_no), -1) + 1 AS next_slot
+                    FROM case_photos WHERE case_id=%s AND sec_id=%s
+                    """,
+                    (case_id, sec_id),
+                )
+                slot_no = cur.fetchone()["next_slot"]
+                cur.execute(
+                    """
+                    INSERT INTO case_photos (case_id, sec_id, slot_no, filename, mime_type, content, size_bytes)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (case_id, sec_id, slot_no) DO UPDATE
+                    SET filename = EXCLUDED.filename, mime_type = EXCLUDED.mime_type,
+                        content = EXCLUDED.content, size_bytes = EXCLUDED.size_bytes,
+                        updated_at = NOW()
+                    RETURNING slot_no
+                    """,
+                    (case_id, sec_id, slot_no, filename, mime, data, len(data)),
+                )
+                slot_no = cur.fetchone()["slot_no"]
+            conn.commit()
+        return slot_no
+
+    def delete_case_photo(self, case_name: str, sec_id: int, slot_no: int) -> bool:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM case_photos
+                    WHERE sec_id=%s AND slot_no=%s
+                      AND case_id=(SELECT id FROM cases WHERE case_name=%s)
+                    RETURNING id
+                    """,
+                    (sec_id, slot_no, case_name),
+                )
+                deleted = cur.fetchone()
+            conn.commit()
+        return deleted is not None
 
     def rename_case(self, old_name: str, new_name: str) -> None:
         self.ensure_schema()

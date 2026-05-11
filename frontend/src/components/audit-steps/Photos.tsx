@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 const BASE_URL = 'http://157.180.28.98:5050';
 
-// Map section string IDs to backend numeric section IDs
 export const SECTION_SEC_ID: Record<string, number> = {
   exterior: 1,
   windows: 2,
@@ -20,7 +19,10 @@ export const SECTION_SEC_ID: Record<string, number> = {
   thermal: 10,
 };
 
-// floorplan managed in Dimensions; bills in EnergyConsumption; temphum/lux in Measurements
+const SEC_ID_TO_SECTION: Record<number, string> = Object.fromEntries(
+  Object.entries(SECTION_SEC_ID).map(([k, v]) => [v, k])
+);
+
 const photoSections = [
   { id: 'exterior',   name: "Tashqi ko'rinish",      required: 3 },
   { id: 'windows',    name: 'Eshik & Derazalar',     required: 3 },
@@ -30,22 +32,18 @@ const photoSections = [
   { id: 'thermal',    name: 'Teplovizor (ixtiyoriy)', required: 0 },
 ];
 
-export interface PhotoItem {
+interface PhotoItem {
   id: string;
-  uri: string;
-  fileName?: string;
-  mimeType?: string;
-  serverKey?: string;
-  isExisting?: boolean;    // true = restored from DB on edit, skip re-upload
-  progress: number;        // 0–100
+  uri: string;          // local compressed URI while uploading, server URL after
+  fileName: string;
+  secId: number;
+  slotNo?: number;      // set after server confirms upload
   uploading: boolean;
-  error?: string;
-  totalBytes: number;
+  progress: number;     // 0–100
   loadedBytes: number;
-  etaSecs?: number;
+  totalBytes: number;
+  error?: string;
 }
-
-const MAX_CONCURRENT = 6;
 
 function makeId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -57,23 +55,31 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/**
- * Compress a photo to 1200px wide at 75% JPEG quality.
- * On web, skip compression if the URI is a data: URI (e.g. HEIC SVG placeholder).
- * Returns { uri, mimeType, fileName }.
- */
+// Compress to 1200px / 75% JPEG before upload — keeps files small for fast transfer
 async function compressPhoto(
   a: { uri: string; fileName?: string; mimeType?: string }
-): Promise<{ uri: string; mimeType: string; fileName: string }> {
+): Promise<{ uri: string; mimeType: string; fileName: string; isPlaceholder: boolean }> {
   const origFileName = a.fileName || a.uri.split('/').pop() || 'photo.jpg';
 
-  // Skip compression for data: URIs (HEIC SVG placeholder on web)
+  // Web HEIC: browser cannot render HEIC, show placeholder; actual JPEG comes from server
+  if (Platform.OS === 'web') {
+    const isHeic = (a.mimeType || '').toLowerCase().includes('heic') ||
+      (a.mimeType || '').toLowerCase().includes('heif') ||
+      origFileName.toLowerCase().endsWith('.heic') ||
+      origFileName.toLowerCase().endsWith('.heif');
+    if (isHeic) {
+      return {
+        uri: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23e5e7eb"/><text x="50" y="55" text-anchor="middle" font-size="12" fill="%236b7280">HEIC</text></svg>',
+        mimeType: 'image/heic',
+        fileName: origFileName,
+        isPlaceholder: true,
+      };
+    }
+  }
+
+  // Skip compression for data: URIs
   if (a.uri.startsWith('data:')) {
-    return {
-      uri: a.uri,
-      mimeType: a.mimeType || 'image/jpeg',
-      fileName: origFileName,
-    };
+    return { uri: a.uri, mimeType: a.mimeType || 'image/jpeg', fileName: origFileName, isPlaceholder: false };
   }
 
   try {
@@ -83,322 +89,202 @@ async function compressPhoto(
       { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
     );
     const baseName = origFileName.replace(/\.[^.]+$/, '') || 'photo';
-    return {
-      uri: result.uri,
-      mimeType: 'image/jpeg',
-      fileName: `${baseName}.jpg`,
-    };
+    return { uri: result.uri, mimeType: 'image/jpeg', fileName: `${baseName}.jpg`, isPlaceholder: false };
   } catch {
-    // Fallback: return original
-    return {
-      uri: a.uri,
-      mimeType: a.mimeType || 'image/jpeg',
-      fileName: origFileName,
-    };
+    return { uri: a.uri, mimeType: a.mimeType || 'image/jpeg', fileName: origFileName, isPlaceholder: false };
   }
 }
 
 export default function Photos({ data, updateData, embedded }: any) {
-  const initItems = (): Record<string, PhotoItem[]> => {
-    if (data.photoItems) return data.photoItems;
-    // Restore from old plain URI format if present
-    if (data.photos) {
-      const restored: Record<string, PhotoItem[]> = {};
-      for (const [sec, uris] of Object.entries(data.photos as Record<string, string[]>)) {
-        restored[sec] = uris.map(uri => ({
-          id: makeId(),
-          uri,
-          serverKey: undefined,
-          progress: 0,
-          uploading: false,
-          totalBytes: 0,
-          loadedBytes: 0,
-        }));
-      }
-      return restored;
-    }
-    return photoSections.reduce((acc, s) => ({ ...acc, [s.id]: [] }), {} as Record<string, PhotoItem[]>);
-  };
-
-  const [photoItems, setPhotoItems] = useState<Record<string, PhotoItem[]>>(initItems);
+  const [photoItems, setPhotoItems] = useState<PhotoItem[]>([]);
   const [activeSection, setActiveSection] = useState(photoSections[0].id);
-  const xhrRefs = useRef<Record<string, XMLHttpRequest>>({});
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  // Concurrency tracking
-  const activeUploadCount = useRef(0);
-  const pendingQueue = useRef<Array<{ sectionId: string; item: PhotoItem }>>([]);
+  const xhrMap = useRef<Map<string, XMLHttpRequest>>(new Map());
 
-  // Notify parent — preserve sections managed by other steps
-  const notifyParent = (items: Record<string, PhotoItem[]>) => {
-    updateData({ photoItems: { ...(data.photoItems || {}), ...items } });
+  const sessionId: string | undefined = data.session_id;
+  const caseName: string | undefined = data._caseName;
+
+  // Notify parent about uploading status so submit can be blocked
+  const prevUploadingRef = useRef(false);
+  useEffect(() => {
+    const isUploading = photoItems.some(p => p.uploading);
+    if (isUploading !== prevUploadingRef.current) {
+      prevUploadingRef.current = isUploading;
+      updateData({ photosUploading: isUploading });
+    }
+  }, [photoItems]);
+
+  // Abort all XHRs on unmount
+  useEffect(() => {
+    return () => { xhrMap.current.forEach(xhr => xhr.abort()); };
+  }, []);
+
+  // Load existing photos on mount
+  useEffect(() => {
+    loadExisting();
+  }, []);
+
+  const loadExisting = async () => {
+    setInitialLoading(true);
+    try {
+      let list: Array<{ sec_id: number; slot_no: number; filename: string }> = [];
+
+      if (caseName) {
+        // Edit mode: _photos is already in data from the form endpoint
+        list = data._photos || [];
+      } else if (sessionId) {
+        // New audit: fetch photos previously saved to this session
+        try {
+          const res = await fetch(`${BASE_URL}/sessions/${encodeURIComponent(sessionId)}/photos`);
+          if (res.ok) list = await res.json();
+        } catch { /* network error — start empty */ }
+      }
+
+      if (list.length > 0) {
+        const items: PhotoItem[] = list.map(p => ({
+          id: `existing_${p.sec_id}_${p.slot_no}`,
+          uri: caseName
+            ? `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${p.sec_id}/${p.slot_no}`
+            : `${BASE_URL}/sessions/${encodeURIComponent(sessionId!)}/photos/${p.sec_id}/${p.slot_no}`,
+          fileName: p.filename,
+          secId: p.sec_id,
+          slotNo: p.slot_no,
+          uploading: false,
+          progress: 100,
+          loadedBytes: 0,
+          totalBytes: 0,
+        }));
+        setPhotoItems(items);
+      }
+    } finally {
+      setInitialLoading(false);
+    }
   };
 
-  const markError = (sectionId: string, itemId: string, error: string) => {
-    setPhotoItems(prev => {
-      const list = [...(prev[sectionId] || [])];
-      const i = list.findIndex(p => p.id === itemId);
-      if (i < 0) return prev;
-      list[i] = { ...list[i], uploading: false, progress: 0, error };
-      return { ...prev, [sectionId]: list };
-    });
-  };
+  const updateItem = useCallback((id: string, updates: Partial<PhotoItem>) => {
+    setPhotoItems(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  }, []);
 
-  // Forward declaration via ref so doXHRUpload can call processQueue
-  const processQueueRef = useRef<(() => void) | null>(null);
+  const startUpload = useCallback((item: PhotoItem, originalUri: string, isPlaceholder: boolean) => {
+    const uploadUrl = caseName
+      ? `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${item.secId}`
+      : `${BASE_URL}/sessions/${encodeURIComponent(sessionId!)}/photos/${item.secId}`;
 
-  const doXHRUpload = useCallback((sectionId: string, item: PhotoItem) => {
-    const xhrKey = `${sectionId}_${item.id}`;
     const xhr = new XMLHttpRequest();
-    xhrRefs.current[xhrKey] = xhr;
-
+    xhrMap.current.set(item.id, xhr);
     const startTime = Date.now();
 
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
       const elapsed = (Date.now() - startTime) / 1000 || 0.001;
       const speed = e.loaded / elapsed;
-      const remaining = speed > 0 ? Math.round((e.total - e.loaded) / speed) : undefined;
-      setPhotoItems(prev => {
-        const list = [...(prev[sectionId] || [])];
-        const i = list.findIndex(p => p.id === item.id);
-        if (i < 0) return prev;
-        list[i] = {
-          ...list[i],
-          progress: Math.round((e.loaded / e.total) * 100),
-          loadedBytes: e.loaded,
-          totalBytes: e.total,
-          etaSecs: remaining,
-        };
-        return { ...prev, [sectionId]: list };
-      });
+      const pct = Math.round((e.loaded / e.total) * 100);
+      updateItem(item.id, { progress: pct, loadedBytes: e.loaded, totalBytes: e.total });
     };
 
     xhr.onload = () => {
-      delete xhrRefs.current[xhrKey];
-      activeUploadCount.current--;
+      xhrMap.current.delete(item.id);
       try {
         const json = JSON.parse(xhr.responseText);
-        if (json.key) {
-          setPhotoItems(prev => {
-            const list = [...(prev[sectionId] || [])];
-            const i = list.findIndex(p => p.id === item.id);
-            if (i < 0) return prev;
-            list[i] = {
-              ...list[i],
-              serverKey: json.key,
-              progress: 100,
-              uploading: false,
-              totalBytes: json.size || list[i].totalBytes,
-              loadedBytes: json.size || list[i].totalBytes,
-            };
-            const updated = { ...prev, [sectionId]: list };
-            notifyParent(updated);
-            return updated;
+        if (json.slot_no !== undefined) {
+          // Replace local URI with server URL so HEIC placeholders resolve to real JPEG
+          const serverUri = caseName
+            ? `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${item.secId}/${json.slot_no}`
+            : `${BASE_URL}/sessions/${encodeURIComponent(sessionId!)}/photos/${item.secId}/${json.slot_no}`;
+          updateItem(item.id, {
+            uploading: false,
+            progress: 100,
+            slotNo: json.slot_no,
+            uri: serverUri,
           });
         } else {
-          markError(sectionId, item.id, 'Upload failed');
+          updateItem(item.id, { uploading: false, error: 'Upload failed' });
         }
       } catch {
-        markError(sectionId, item.id, 'Server error');
+        updateItem(item.id, { uploading: false, error: 'Server error' });
       }
-      processQueueRef.current?.();
     };
 
     xhr.onerror = () => {
-      delete xhrRefs.current[xhrKey];
-      activeUploadCount.current--;
-      markError(sectionId, item.id, 'Network error');
-      processQueueRef.current?.();
+      xhrMap.current.delete(item.id);
+      updateItem(item.id, { uploading: false, error: 'Network error' });
     };
 
-    xhr.open('POST', `${BASE_URL}/upload_photo`);
-
-    // Determine file details from item (already compressed)
-    const filename = item.fileName || item.uri.split('/').pop() || 'photo.jpg';
-    const ext = filename.split('.').pop()?.toLowerCase() || 'jpg';
-    const uriBasename = item.uri.split('/').pop() || '';
-    const uriExt = uriBasename.split('.').pop()?.toLowerCase() || '';
-    // HEIC detection — only relevant for non-compressed items or fallback
-    const isHeicFile =
-      ext === 'heic' || ext === 'heif' ||
-      uriExt === 'heic' || uriExt === 'heif' ||
-      (item.mimeType || '').toLowerCase().includes('heic') ||
-      (item.mimeType || '').toLowerCase().includes('heif');
-
-    // After compression, mimeType is set to 'image/jpeg' for native.
-    // Use item.mimeType if set (from compressPhoto), else derive from extension.
-    const mimeType = item.mimeType && !isHeicFile
-      ? item.mimeType
-      : (isHeicFile ? 'image/heic' : (ext === 'png' ? 'image/png' : 'image/jpeg'));
+    xhr.open('POST', uploadUrl);
 
     if (Platform.OS === 'web') {
-      // On web, item.uri may be a blob: URL; use _originalUri if available
-      const uploadUri = (item as any)._originalUri || item.uri;
-      fetch(uploadUri)
+      // On web fetch the original blob (before compression/placeholder substitution)
+      fetch(isPlaceholder ? item.uri : originalUri)
         .then(r => r.blob())
         .then(blob => {
-          // On web, always send as JPEG (browser converts HEIC automatically)
-          const finalFilename = filename.replace(/\.[^.]+$/, '.jpg');
-          const typedBlob = new Blob([blob], { type: 'image/jpeg' });
           const fd = new FormData();
-          fd.append('photo', typedBlob, finalFilename);
+          const fname = item.fileName.replace(/\.[^.]+$/, '.jpg');
+          fd.append('photo', new Blob([blob], { type: 'image/jpeg' }), fname);
           xhr.send(fd);
         })
         .catch(() => {
-          activeUploadCount.current--;
-          markError(sectionId, item.id, 'Failed to read image');
-          processQueueRef.current?.();
+          xhrMap.current.delete(item.id);
+          updateItem(item.id, { uploading: false, error: 'Failed to read image' });
         });
     } else {
       const fd = new FormData();
-      fd.append('photo', { uri: item.uri, name: filename, type: mimeType } as any);
+      fd.append('photo', { uri: originalUri, name: item.fileName, type: item.fileName.toLowerCase().endsWith('.heic') || item.fileName.toLowerCase().endsWith('.heif') ? 'image/heic' : 'image/jpeg' } as any);
       xhr.send(fd);
     }
-  }, []);
-
-  const processQueue = useCallback(() => {
-    while (activeUploadCount.current < MAX_CONCURRENT && pendingQueue.current.length > 0) {
-      const next = pendingQueue.current.shift()!;
-      activeUploadCount.current++;
-      // Mark as uploading in state
-      setPhotoItems(prev => {
-        const list = [...(prev[next.sectionId] || [])];
-        const idx = list.findIndex(p => p.id === next.item.id);
-        if (idx < 0) {
-          activeUploadCount.current--;
-          return prev;
-        }
-        list[idx] = { ...list[idx], uploading: true, progress: 0, error: undefined };
-        return { ...prev, [next.sectionId]: list };
-      });
-      // Start XHR (pass item object for URI/name/type since it may not be in state yet)
-      doXHRUpload(next.sectionId, next.item);
-    }
-  }, [doXHRUpload]);
-
-  // Keep processQueueRef in sync so doXHRUpload callbacks can call it
-  useEffect(() => {
-    processQueueRef.current = processQueue;
-  }, [processQueue]);
-
-  // On mount: re-enqueue any locally-added photos that lost their server key (e.g. hot-reload
-  // or draft restore). Also reset items stuck with uploading:true but no running XHR (happens
-  // when a draft was saved mid-upload and then restored).
-  // Skip photos marked isExisting — those are already in the DB and don't need re-uploading.
-  useEffect(() => {
-    let changed = false;
-    const resetItems: Record<string, PhotoItem[]> = {};
-    for (const [sec, list] of Object.entries(photoItems)) {
-      list.forEach((item) => {
-        if (item.serverKey || item.isExisting) return;
-        if (!item.uri) return;
-        const xhrKey = `${sec}_${item.id}`;
-        const isActuallyUploading = item.uploading && !!xhrRefs.current[xhrKey];
-        if (!isActuallyUploading) {
-          changed = true;
-          const normalizedItem = item.uploading
-            ? { ...item, uploading: false, progress: 0 }
-            : item;
-          if (item.uploading) {
-            if (!resetItems[sec]) resetItems[sec] = [...list];
-            const idx = resetItems[sec].findIndex(p => p.id === item.id);
-            if (idx >= 0) resetItems[sec][idx] = normalizedItem;
-          }
-          pendingQueue.current.push({ sectionId: sec, item: normalizedItem });
-        }
-      });
-    }
-    if (changed) {
-      if (Object.keys(resetItems).length > 0) {
-        setPhotoItems(prev => ({ ...prev, ...resetItems }));
-      }
-      processQueue();
-    }
-  }, []); // only on mount
-
-  const retryUpload = (sectionId: string, itemId: string) => {
-    setPhotoItems(prev => {
-      const list = [...(prev[sectionId] || [])];
-      const idx = list.findIndex(p => p.id === itemId);
-      if (idx < 0) return prev;
-      const item = { ...list[idx], error: undefined, uploading: false, serverKey: undefined, progress: 0 };
-      list[idx] = item;
-      const updated = { ...prev, [sectionId]: list };
-      // Enqueue back and process
-      pendingQueue.current.push({ sectionId, item });
-      processQueue();
-      return updated;
-    });
-  };
+  }, [caseName, sessionId, updateItem]);
 
   const addPhotos = async (sectionId: string, assets: Array<{ uri: string; fileName?: string; mimeType?: string }>) => {
-    // Compress each photo before adding
-    const compressedAssets = await Promise.all(
-      assets.map(async (a) => {
-        const isHeic = a.mimeType?.includes('heic') || a.mimeType?.includes('heif') ||
-          a.fileName?.toLowerCase().endsWith('.heic') || a.fileName?.toLowerCase().endsWith('.heif');
-        // For HEIC on web, use a grey placeholder since browser can't display HEIC
-        const isWebHeicPlaceholder = Platform.OS === 'web' && isHeic;
-        const displayUri = isWebHeicPlaceholder
-          ? 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23e5e7eb"/><text x="50" y="55" text-anchor="middle" font-size="12" fill="%236b7280">HEIC</text></svg>'
-          : a.uri;
-        // Compress the real URI (not the SVG placeholder)
-        const compressed = await compressPhoto({ uri: a.uri, fileName: a.fileName, mimeType: a.mimeType });
-        return {
-          originalUri: a.uri,
-          displayUri,
-          compressed,
-          isWebHeicPlaceholder,
-        };
-      })
-    );
+    if (!sessionId && !caseName) return;
 
-    // Build new items BEFORE calling setPhotoItems so we can reference them outside
-    const uploadUri = (ca: typeof compressedAssets[0]) =>
-      ca.isWebHeicPlaceholder ? ca.originalUri : ca.compressed.uri;
-    const newItems: PhotoItem[] = compressedAssets.map(ca => ({
+    const secId = SECTION_SEC_ID[sectionId];
+    const compressed = await Promise.all(assets.map(a => compressPhoto(a)));
+
+    const newItems: PhotoItem[] = compressed.map((c, i) => ({
       id: makeId(),
-      uri: Platform.OS !== 'web' ? ca.compressed.uri : ca.displayUri,
-      fileName: ca.compressed.fileName,
-      mimeType: ca.compressed.mimeType,
+      uri: c.uri,
+      fileName: c.fileName,
+      secId,
+      slotNo: undefined,
+      uploading: true,
       progress: 0,
-      uploading: false,
-      totalBytes: 0,
       loadedBytes: 0,
-      _originalUri: uploadUri(ca),
-    } as PhotoItem & { _originalUri?: string }));
+      totalBytes: 0,
+    }));
 
-    // Pure state update — no side effects inside the updater
-    setPhotoItems(prev => {
-      const existing = prev[sectionId] || [];
-      const updated = { ...prev, [sectionId]: [...existing, ...newItems] };
-      notifyParent(updated);
-      return updated;
-    });
+    // Add to state immediately so photos appear with spinner right away
+    setPhotoItems(prev => [...prev, ...newItems]);
 
-    // Enqueue and trigger outside the updater so they run exactly once
-    newItems.forEach(item => {
-      pendingQueue.current.push({ sectionId, item });
+    // Start each upload immediately — no queue, no delay
+    newItems.forEach((item, i) => {
+      startUpload(item, assets[i].uri, compressed[i].isPlaceholder);
     });
-    setTimeout(() => processQueue(), 0);
   };
 
-  const removePhoto = (sectionId: string, itemId: string) => {
-    const item = photoItems[sectionId]?.find(p => p.id === itemId);
-    if (item) {
-      const xhrKey = `${sectionId}_${item.id}`;
-      xhrRefs.current[xhrKey]?.abort();
-      delete xhrRefs.current[xhrKey];
-      // Also remove from pending queue
-      pendingQueue.current = pendingQueue.current.filter(
-        q => !(q.sectionId === sectionId && q.item.id === itemId)
-      );
+  const retryUpload = async (item: PhotoItem) => {
+    updateItem(item.id, { error: undefined, uploading: true, progress: 0 });
+    // We don't have the original asset anymore — re-compress from current uri
+    const sectionId = SEC_ID_TO_SECTION[item.secId] || 'exterior';
+    const c = await compressPhoto({ uri: item.uri, fileName: item.fileName });
+    const refreshed = { ...item, uploading: true, progress: 0, error: undefined };
+    setPhotoItems(prev => prev.map(p => p.id === item.id ? refreshed : p));
+    startUpload(refreshed, item.uri, c.isPlaceholder);
+  };
+
+  const removePhoto = async (item: PhotoItem) => {
+    // Abort in-progress XHR
+    const xhr = xhrMap.current.get(item.id);
+    if (xhr) { xhr.abort(); xhrMap.current.delete(item.id); }
+
+    // Delete from server if already saved
+    if (item.slotNo !== undefined) {
+      const deleteUrl = caseName
+        ? `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${item.secId}/${item.slotNo}`
+        : `${BASE_URL}/sessions/${encodeURIComponent(sessionId!)}/photos/${item.secId}/${item.slotNo}`;
+      fetch(deleteUrl, { method: 'DELETE' }).catch(() => {});
     }
-    setPhotoItems(prev => {
-      const updated = { ...prev, [sectionId]: (prev[sectionId] || []).filter(p => p.id !== itemId) };
-      notifyParent(updated);
-      return updated;
-    });
+
+    setPhotoItems(prev => prev.filter(p => p.id !== item.id));
   };
 
   const pickImage = async (sectionId: string) => {
@@ -415,21 +301,27 @@ export default function Photos({ data, updateData, embedded }: any) {
     if (!result.canceled) addPhotos(sectionId, [{ uri: result.assets[0].uri, fileName: result.assets[0].fileName ?? undefined, mimeType: result.assets[0].mimeType ?? undefined }]);
   };
 
-  const currentItems = photoItems[activeSection] || [];
+  const currentSecId = SECTION_SEC_ID[activeSection];
+  const currentItems = photoItems.filter(p => p.secId === currentSecId);
   const currentSection = photoSections.find(s => s.id === activeSection);
-  const allFlat = Object.values(photoItems).flat();
-  const uploadingCount = allFlat.filter(p => p.uploading).length;
-  const pendingCount = allFlat.filter(p => !p.serverKey && !p.isExisting && !p.uploading && !p.error).length;
-  const totalCount = allFlat.length;
-  const doneCount = allFlat.filter(p => !!p.serverKey || !!p.isExisting).length;
+  const allUploading = photoItems.filter(p => p.uploading).length;
+  const allDone = photoItems.filter(p => p.slotNo !== undefined && !p.uploading).length;
+  const allTotal = photoItems.length;
 
   const Wrapper: any = embedded ? View : ScrollView;
   return (
     <Wrapper style={styles.container}>
-      {(uploadingCount > 0 || pendingCount > 0) && (
+      {initialLoading && (
         <View style={styles.globalProgress}>
           <ActivityIndicator size="small" color="#2563eb" />
-          <Text style={styles.globalProgressText}>Uploading {doneCount} / {totalCount}</Text>
+          <Text style={styles.globalProgressText}>Loading photos…</Text>
+        </View>
+      )}
+
+      {!initialLoading && allUploading > 0 && (
+        <View style={styles.globalProgress}>
+          <ActivityIndicator size="small" color="#2563eb" />
+          <Text style={styles.globalProgressText}>Uploading {allDone} / {allTotal}</Text>
         </View>
       )}
 
@@ -441,8 +333,9 @@ export default function Photos({ data, updateData, embedded }: any) {
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sectionTabs}>
           {photoSections.map(s => {
-            const items = photoItems[s.id] || [];
-            const done = items.filter(p => !!p.serverKey || !!p.isExisting).length;
+            const secId = SECTION_SEC_ID[s.id];
+            const items = photoItems.filter(p => p.secId === secId);
+            const done = items.filter(p => p.slotNo !== undefined && !p.uploading).length;
             const uploading = items.filter(p => p.uploading).length;
             return (
               <TouchableOpacity
@@ -465,8 +358,7 @@ export default function Photos({ data, updateData, embedded }: any) {
         </ScrollView>
 
         <View style={styles.photoGrid}>
-          {currentItems.map((item) => {
-            return (
+          {currentItems.map((item) => (
             <View key={item.id} style={styles.photoContainer}>
               {item.uri.startsWith('data:image/svg') ? (
                 <View style={[styles.photo, styles.heicPlaceholder, item.uploading && styles.photoDim]}>
@@ -477,7 +369,7 @@ export default function Photos({ data, updateData, embedded }: any) {
                 <Image source={{ uri: item.uri }} style={[styles.photo, item.uploading && styles.photoDim]} />
               )}
 
-              {/* Upload progress overlay */}
+              {/* Upload progress overlay — shown only while uploading */}
               {item.uploading && (
                 <View style={styles.progressOverlay}>
                   <ActivityIndicator size="small" color="#fff" />
@@ -487,38 +379,33 @@ export default function Photos({ data, updateData, embedded }: any) {
                       {formatBytes(item.loadedBytes)}/{formatBytes(item.totalBytes)}
                     </Text>
                   )}
-                  {item.etaSecs !== undefined && item.etaSecs > 0 && (
-                    <Text style={styles.progressEta}>{item.etaSecs}s left</Text>
-                  )}
                 </View>
               )}
 
-              {/* Done / saved indicator */}
-              {(item.serverKey || item.isExisting) && !item.uploading && (
+              {/* Done indicator — green for new upload, purple for pre-existing */}
+              {item.slotNo !== undefined && !item.uploading && !item.error && (
                 <View style={styles.doneIndicator}>
                   <Ionicons
-                    name={item.isExisting && !item.serverKey ? 'cloud-done-outline' : 'checkmark-circle'}
+                    name={item.id.startsWith('existing_') ? 'cloud-done-outline' : 'checkmark-circle'}
                     size={18}
-                    color={item.isExisting && !item.serverKey ? '#6366f1' : '#10b981'}
+                    color={item.id.startsWith('existing_') ? '#6366f1' : '#10b981'}
                   />
                 </View>
               )}
 
-              {/* Error indicator */}
+              {/* Error with retry */}
               {item.error && !item.uploading && (
-                <TouchableOpacity style={styles.errorIndicator} onPress={() => retryUpload(activeSection, item.id)}>
+                <TouchableOpacity style={styles.errorIndicator} onPress={() => retryUpload(item)}>
                   <Ionicons name="warning" size={16} color="#ef4444" />
                   <Text style={styles.errorText}>Retry</Text>
                 </TouchableOpacity>
               )}
 
-              {/* Remove button */}
-              <TouchableOpacity onPress={() => removePhoto(activeSection, item.id)} style={styles.removeBtn}>
+              <TouchableOpacity onPress={() => removePhoto(item)} style={styles.removeBtn}>
                 <Ionicons name="close-circle" size={24} color="#ef4444" />
               </TouchableOpacity>
             </View>
-            );
-          })}
+          ))}
 
           <View style={styles.addPhotoButtons}>
             {Platform.OS !== 'web' && (
@@ -536,9 +423,9 @@ export default function Photos({ data, updateData, embedded }: any) {
 
         {currentSection && currentSection.required > 0 && (
           <Text style={styles.requirement}>
-            {currentItems.filter(p => !!p.serverKey).length >= currentSection.required
+            {currentItems.filter(p => p.slotNo !== undefined && !p.uploading).length >= currentSection.required
               ? '✓ Minimum photos uploaded'
-              : `Add at least ${currentSection.required - currentItems.filter(p => !!p.serverKey).length} more photo(s)`}
+              : `Add at least ${currentSection.required - currentItems.filter(p => p.slotNo !== undefined && !p.uploading).length} more photo(s)`}
           </Text>
         )}
       </View>
@@ -566,7 +453,6 @@ const styles = StyleSheet.create({
   progressOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 2 },
   progressPct: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
   progressBytes: { color: 'rgba(255,255,255,0.85)', fontSize: 9, textAlign: 'center' },
-  progressEta: { color: 'rgba(255,255,255,0.85)', fontSize: 9 },
   doneIndicator: { position: 'absolute', bottom: 4, right: 4, backgroundColor: '#fff', borderRadius: 10 },
   errorIndicator: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 2 },
   errorText: { color: '#ef4444', fontSize: 10, fontWeight: '600' },

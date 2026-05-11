@@ -126,6 +126,28 @@ def _convert_heic_to_jpg(data: bytes, filename: str):
 
 # ── Photo upload ───────────────────────────────────────────────────────────
 
+def _process_photo_upload(file_obj) -> tuple:
+    """Read, normalize MIME, HEIC-convert. Returns (data, filename, mime)."""
+    data = file_obj.read()
+    if not data:
+        return None, None, None
+    mime = file_obj.content_type or "image/jpeg"
+    filename = file_obj.filename or "photo.jpg"
+    if mime in ("application/octet-stream", ""):
+        ext = Path(filename).suffix.lower()
+        mime = {".heic": "image/heic", ".heif": "image/heif", ".png": "image/png",
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(ext, "image/jpeg")
+    is_heic = (mime.lower() in ("image/heic", "image/heif") or
+               Path(filename).suffix.lower() in (".heic", ".heif"))
+    if is_heic:
+        try:
+            data, filename, mime = _convert_heic_to_jpg(data, filename)
+        except RuntimeError:
+            filename = Path(filename).stem + '.jpg'
+            mime = 'image/jpeg'
+    return data, filename, mime
+
+
 @app.route("/upload_photo", methods=["POST", "OPTIONS"])
 def upload_photo():
     """Accept a single photo, convert HEIC→JPG if needed, return a temp key."""
@@ -165,6 +187,81 @@ def upload_photo():
     key = str(_uuid.uuid4())
     _temp_photo_save(key, data, mime, filename)
     return jsonify({"key": key, "size": len(data)})
+
+
+# ── Session photo routes (new audit) ───────────────────────────────────────
+
+@app.route("/sessions/<session_id>/photos/<int:sec_id>", methods=["POST", "OPTIONS"])
+def upload_session_photo(session_id, sec_id):
+    if "photo" not in request.files:
+        return _error_response("No 'photo' field", 400)
+    data, filename, mime = _process_photo_upload(request.files["photo"])
+    if not data:
+        return _error_response("Empty file", 400)
+    try:
+        slot_no = get_storage().save_session_photo(session_id, sec_id, data, mime, filename)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    return jsonify({"slot_no": slot_no, "sec_id": sec_id, "size": len(data)})
+
+
+@app.route("/sessions/<session_id>/photos/<int:sec_id>/<int:slot_no>", methods=["GET"])
+def get_session_photo(session_id, sec_id, slot_no):
+    try:
+        row = get_storage().get_session_photo(session_id, sec_id, slot_no)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    if not row:
+        return _error_response("Photo not found", 404)
+    return send_file(io.BytesIO(row["content"]), mimetype=row["mime_type"] or "image/jpeg",
+                     as_attachment=False, download_name=row["filename"])
+
+
+@app.route("/sessions/<session_id>/photos/<int:sec_id>/<int:slot_no>", methods=["DELETE", "OPTIONS"])
+def delete_session_photo(session_id, sec_id, slot_no):
+    try:
+        deleted = get_storage().delete_session_photo(session_id, sec_id, slot_no)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    if not deleted:
+        return _error_response("Photo not found", 404)
+    return jsonify({"ok": True})
+
+
+@app.route("/sessions/<session_id>/photos", methods=["GET"])
+def list_session_photos(session_id):
+    try:
+        photos = get_storage().list_session_photos(session_id)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    return jsonify([{"sec_id": p["sec_id"], "slot_no": p["slot_no"], "filename": p["filename"]} for p in photos])
+
+
+# ── Case photo upload / delete (edit mode) ──────────────────────────────────
+
+@app.route("/cases/<case_name>/photos/<int:sec_id>", methods=["POST", "OPTIONS"])
+def upload_case_photo(case_name, sec_id):
+    if "photo" not in request.files:
+        return _error_response("No 'photo' field", 400)
+    data, filename, mime = _process_photo_upload(request.files["photo"])
+    if not data:
+        return _error_response("Empty file", 400)
+    try:
+        slot_no = get_storage().save_case_photo(case_name, sec_id, data, mime, filename)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    return jsonify({"slot_no": slot_no, "sec_id": sec_id, "size": len(data)})
+
+
+@app.route("/cases/<case_name>/photos/<int:sec_id>/<int:slot_no>", methods=["DELETE", "OPTIONS"])
+def delete_case_photo(case_name, sec_id, slot_no):
+    try:
+        deleted = get_storage().delete_case_photo(case_name, sec_id, slot_no)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    if not deleted:
+        return _error_response("Photo not found", 404)
+    return jsonify({"ok": True})
 
 
 # ── Generate report ────────────────────────────────────────────────────────
@@ -221,7 +318,7 @@ def generate():
                 if file_obj and file_obj.filename:
                     uploaded_photos[(sec, n)] = file_obj
 
-    # Resolve pre-uploaded photo keys from mobile real-time uploads
+    # Resolve pre-uploaded photo keys (legacy temp-file path, kept for backwards compat)
     from storage import BinaryUpload
     for sec in range(1, 11):
         for n in range(1, 16):
@@ -233,6 +330,17 @@ def generate():
                     uploaded_photos[(sec, n)] = BinaryUpload(
                         filename=filename, content=data, mimetype=mime
                     )
+
+    # Load photos from session (new persistent upload path)
+    session_id = form_data.pop("session_id", None) or None
+    if session_id:
+        try:
+            session_photos = get_storage().get_all_session_photos(session_id)
+            for key, upload in session_photos.items():
+                if key not in uploaded_photos:
+                    uploaded_photos[key] = upload
+        except Exception as exc:
+            print(f"Warning: failed to load session photos: {exc}")
 
     edit_case = form_data.pop("edit_case", None) or None
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
@@ -275,6 +383,11 @@ def generate():
                 progress_fn=progress_fn,
             )
             progress_queue.put({'progress': 100, 'done': True, **result})
+            if session_id and result.get('success'):
+                try:
+                    get_storage().delete_session(session_id)
+                except Exception:
+                    pass
         except Exception as exc:
             import traceback
             traceback.print_exc()
