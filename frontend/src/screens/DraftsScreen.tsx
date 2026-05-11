@@ -77,7 +77,9 @@ export default function DraftsScreen({ onBack, navigation, onResume }: Props) {
   }, [navigation, onResume]);
 
   const handleDelete = useCallback(async (id: string) => {
+    const token = await AsyncStorage.getItem('auth_token');
     await draftStorage.clearById(id);
+    if (token) draftStorage.clearOnServer(token);
     setDrafts(prev => prev.filter(d => d.id !== id));
   }, []);
 
