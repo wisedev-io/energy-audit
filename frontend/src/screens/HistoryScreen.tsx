@@ -119,6 +119,24 @@ function reconstructPhotoItems(
   return items;
 }
 
+function getCaseNo(caseName: string): string {
+  return caseName?.match(/EA-(\d+)/)?.[1] || caseName;
+}
+
+function getFileDisplayName(filename: string, caseNo: string): string {
+  if (filename.endsWith('_passport.docx')) return `passport-${caseNo}.docx`;
+  if (filename.endsWith('.docx')) return `report-${caseNo}.docx`;
+  if (filename.endsWith('.xlsx')) return `calculations-${caseNo}.xlsx`;
+  return filename;
+}
+
+function getFileIcon(filename: string): string {
+  if (filename.endsWith('.xlsx')) return 'grid-outline';
+  if (filename.includes('passport')) return 'document-outline';
+  if (filename.endsWith('.zip')) return 'archive-outline';
+  return 'document-text-outline';
+}
+
 export default function HistoryScreen({ navigation, user = null }: { navigation?: any; user?: any }) {
   const insets = useSafeAreaInsets();
   const [cases, setCases] = useState<any[]>([]);
@@ -359,33 +377,54 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
                 {/* Card header */}
                 <View style={styles.auditCardHeader}>
                   <View style={styles.auditIconWrap}>
-                    <Ionicons name="business-outline" size={20} color={Colors.primary} />
+                    <Text style={styles.auditInitials}>
+                      {(audit.owner || '??').replace(/[^a-zA-ZЀ-ӿ]/g, '').slice(0, 2).toUpperCase()}
+                    </Text>
                   </View>
                   <View style={styles.auditMeta}>
                     <Text style={styles.auditName} numberOfLines={1}>{audit.name}</Text>
                     <Text style={styles.auditOwner} numberOfLines={1}>{audit.owner || '—'}</Text>
                   </View>
-                  <Text style={styles.auditDate}>{audit.updated_at?.split(' ')[0] || audit.updated_at || ''}</Text>
+                  <View style={styles.auditDateWrap}>
+                    <Text style={styles.auditDateLabel}>Created: {audit.created_at?.split('T')[0] || audit.created_at?.split(' ')[0] || ''}</Text>
+                    {audit.updated_at && audit.created_at && audit.updated_at.split('T')[0] !== audit.created_at.split('T')[0] && (
+                      <Text style={styles.auditDateEdited}>Edited: {audit.updated_at?.split('T')[0] || ''}</Text>
+                    )}
+                  </View>
                 </View>
 
                 {/* Files */}
-                {audit.files?.length > 0 && (
+                {(audit.files?.length > 0 || true) && (
                   <View style={styles.filesRow}>
-                    {audit.files.map((file: string) => (
-                      <TouchableOpacity
-                        key={file}
-                        style={styles.fileChip}
-                        onPress={() => Linking.openURL(`${BASE_URL}/cases/${audit.name}/${file}`)}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name={file.endsWith('.xlsx') ? 'grid-outline' : 'document-text-outline'}
-                          size={12}
-                          color={Colors.primary}
-                        />
-                        <Text style={styles.fileChipText}>{file.split('.').pop()?.toUpperCase()}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    {audit.files?.map((file: string) => {
+                      const caseNo = getCaseNo(audit.name);
+                      const displayName = getFileDisplayName(file, caseNo);
+                      const iconName = getFileIcon(file);
+                      return (
+                        <TouchableOpacity
+                          key={file}
+                          style={styles.fileChip}
+                          onPress={() => Linking.openURL(`${BASE_URL}/cases/${encodeURIComponent(audit.name)}/${encodeURIComponent(file)}`)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name={iconName as any} size={12} color={Colors.primary} />
+                          <Text style={styles.fileChipText} numberOfLines={1}>{displayName}</Text>
+                          <Ionicons name="download-outline" size={11} color={Colors.textMuted} />
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {/* Photos ZIP */}
+                    <TouchableOpacity
+                      style={[styles.fileChip, styles.fileChipZip]}
+                      onPress={() => Linking.openURL(`${BASE_URL}/cases/${encodeURIComponent(audit.name)}/photos.zip`)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="archive-outline" size={12} color={Colors.orange} />
+                      <Text style={[styles.fileChipText, { color: Colors.orange }]} numberOfLines={1}>
+                        photos-{getCaseNo(audit.name)}.zip
+                      </Text>
+                      <Ionicons name="download-outline" size={11} color={Colors.orange} />
+                    </TouchableOpacity>
                   </View>
                 )}
 
@@ -590,7 +629,10 @@ const styles = StyleSheet.create({
   auditMeta: { flex: 1 },
   auditName: { fontSize: 14, fontWeight: '700', color: Colors.text },
   auditOwner: { fontSize: 13, color: Colors.textSec, marginTop: 2 },
-  auditDate: { fontSize: 11, color: Colors.textMuted, flexShrink: 0 },
+  auditInitials: { fontSize: 15, fontWeight: '800', color: Colors.primary },
+  auditDateWrap: { alignItems: 'flex-end', flexShrink: 0 },
+  auditDateLabel: { fontSize: 10, color: Colors.textMuted },
+  auditDateEdited: { fontSize: 10, color: Colors.orange, marginTop: 1 },
 
   filesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Space.sm, marginBottom: Space.md },
   fileChip: {
@@ -603,8 +645,10 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderWidth: 1,
     borderColor: Colors.border,
+    maxWidth: 200,
   },
-  fileChipText: { fontSize: 11, color: Colors.primary, fontWeight: '700' },
+  fileChipText: { fontSize: 11, color: Colors.primary, fontWeight: '600', flexShrink: 1 },
+  fileChipZip: { backgroundColor: Colors.orangeLight, borderColor: '#FDDCAB' },
 
   actionRow: { flexDirection: 'row', gap: Space.sm },
   actionBtn: {

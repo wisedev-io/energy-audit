@@ -171,6 +171,10 @@ def upload_photo():
 
 @app.route("/generate", methods=["POST"])
 def generate():
+    import threading
+    import queue as _queue
+    import json as _json_mod
+    from flask import Response, stream_with_context
     from generate import generate_all
 
     form_data = {}
@@ -258,19 +262,44 @@ def generate():
         except Exception:
             pass
 
-    try:
-        result = generate_all(
-            form_data, uploaded_photos,
-            edit_case_name=edit_case,
-            created_by=created_by,
-        )
-        return jsonify(result)
-    except StorageError as exc:
-        return _error_response(str(exc), 500)
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        return _error_response(str(exc), 500)
+    progress_queue = _queue.Queue()
+
+    def run():
+        try:
+            def progress_fn(pct, msg):
+                progress_queue.put({'progress': pct, 'message': msg})
+            result = generate_all(
+                form_data, uploaded_photos,
+                edit_case_name=edit_case,
+                created_by=created_by,
+                progress_fn=progress_fn,
+            )
+            progress_queue.put({'progress': 100, 'done': True, **result})
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            progress_queue.put({'progress': 0, 'done': True, 'success': False, 'error': str(exc)})
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+    def event_stream():
+        while True:
+            try:
+                item = progress_queue.get(timeout=120)
+                yield _json_mod.dumps(item) + '\n'
+                if item.get('done'):
+                    break
+            except _queue.Empty:
+                yield _json_mod.dumps({'progress': 50, 'message': 'Still generating…'}) + '\n'
+
+    resp = Response(
+        stream_with_context(event_stream()),
+        content_type='application/x-ndjson',
+    )
+    resp.headers['X-Accel-Buffering'] = 'no'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
 
 
 # ── Cases ──────────────────────────────────────────────────────────────────
@@ -354,6 +383,31 @@ def download_file(case_name, filename):
         mimetype=record["mime_type"],
         as_attachment=True,
         download_name=record["filename"],
+    )
+
+
+@app.route("/cases/<case_name>/photos.zip", methods=["GET"])
+def download_photos_zip(case_name):
+    import zipfile
+    try:
+        storage = get_storage()
+        photos = storage.get_case_photos(case_name)
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
+    if not photos:
+        return _error_response("No photos found", 404)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for (sec_id, slot_no), upload in sorted(photos.items()):
+            arcname = f"s{sec_id}_{slot_no:02d}_{upload.filename}"
+            zf.writestr(arcname, upload.content)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f"photos-{case_name}.zip",
     )
 
 

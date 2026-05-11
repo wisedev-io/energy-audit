@@ -53,7 +53,7 @@ def generate_charts(energy, out_dir):
         sizes = [s['total_elec'], s['total_gkwh'], s['total_okwh']]
         if sum(sizes) == 0:
             sizes = [1, 1, 1]
-        fig, ax = plt.subplots(figsize=(4.5, 4))
+        fig, ax = plt.subplots(figsize=(3.2, 2.8))
         wedges, texts, autotexts = ax.pie(
             sizes, labels=labels, colors=colors,
             autopct='%1.1f%%', startangle=140,
@@ -72,7 +72,7 @@ def generate_charts(energy, out_dir):
 
     # --- Bar chart: annual total cost ---
     totals = [energy[y]['summary']['total_cost'] for y in years]
-    fig, ax = plt.subplots(figsize=(5, 3.5))
+    fig, ax = plt.subplots(figsize=(2.5, 1.75))
     bars = ax.bar([str(y) for y in years], totals, color=colors[:3], width=0.5)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(_fmt_mln))
     ax.set_ylabel("mln. so'm", fontsize=9)
@@ -870,16 +870,15 @@ def _room_vars(data):
     for src, dst in [(1, 3), (2, 4)]:
         t = float(data.get(f'r{src}_temp') or 22)
         h = float(data.get(f'r{src}_hum')  or 50)
-        l = float(data.get(f'r{src}_lux')  or 300)
-        v[f'r{dst}_temp'] = _fmt_meas(_rnd(t, 5, 1))
-        v[f'r{dst}_hum']  = _fmt_meas(_rnd(h, 5, 1, min_val=10))
-        v[f'r{dst}_lux']  = int(_rnd(l, 25, 0, min_val=50))
+        v[f'r{dst}_temp'] = _fmt_meas(_rnd(t, 3, 1, min_val=20))
+        v[f'r{dst}_hum']  = _fmt_meas(_rnd(h, 5, 1, min_val=30))
+        v[f'r{dst}_lux']  = random.randint(300, 500)
     return v
 
 
 def _u_val(norm):
-    """Return a U-value near the norm standard, varied ±0–0.35."""
-    return round(norm + random.uniform(-0.35, 0.35), 2)
+    """Return a U-value below the norm standard (always ≤ norm)."""
+    return round(max(0.1, norm - random.uniform(0, 0.35)), 2)
 
 
 def _fmt_date(d):
@@ -956,7 +955,7 @@ def build_variables(data, energy, areas, case_no):
         w   = float(data.get(f'apl{i}_w')   or 0)
         n   = float(data.get(f'apl{i}_n')   or 0)
         hrs = float(data.get(f'apl{i}_hrs') or 0)
-        apl_total_kwh += w * n * hrs * 365 / 1000
+        apl_total_kwh += w * n * hrs / 1000
         appl_kw_total += w * n / 1000
 
     # Door / window counts
@@ -1124,7 +1123,7 @@ def build_variables(data, energy, areas, case_no):
         'e25_mln':      round(s25['total_elec_cost'] / 1e6, 3),
 
         # Appliances
-        'apl_total':    round(apl_total_kwh, 1),
+        'apl_total':    f"{round(apl_total_kwh, 1):.1f}",
         'appl_kw':      round(appl_kw_total, 2),
 
         # Doors / windows counts
@@ -1276,13 +1275,18 @@ def _generated_file_record(path, file_kind):
     }
 
 
-def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=None):
+def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=None, progress_fn=None):
     """
     form_data: dict of all form fields
     uploaded_photos: dict {(sec_id, n): file-like object}
     edit_case_name: if set, update files in this existing case
+    progress_fn: optional callable(pct: int, msg: str) called at key steps
     Returns: dict with case_name, case_no, files list
     """
+    def _progress(pct, msg):
+        if progress_fn:
+            progress_fn(pct, msg)
+
     storage = get_storage()
     old_case_name = None
 
@@ -1316,6 +1320,7 @@ def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=Non
     # Calculate
     energy = calc_all(form_data)
     areas  = calc_areas(form_data)
+    _progress(15, "Calculating energy data…")
 
     # Variables
     variables = build_variables(form_data, energy, areas, case_no)
@@ -1330,11 +1335,14 @@ def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=Non
         photos_dir.mkdir(parents=True, exist_ok=True)
 
         photo_paths_by_sec, stored_photos = _materialize_photo_inputs(photo_inputs, photos_dir)
+        _progress(25, "Processing photos…")
 
         xlsx_path = tmp_dir / xlsx_name
         write_excel(form_data, energy, areas, xlsx_path)
+        _progress(40, "Generating Excel…")
 
         chart_paths = generate_charts(energy, tmp_dir)
+        _progress(55, "Generating charts…")
 
         docx_path = tmp_dir / docx_name
         generate_word_report(
@@ -1346,9 +1354,11 @@ def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=Non
             docx_path,
             form_data,
         )
+        _progress(75, "Generating Word report…")
 
         passport_path = tmp_dir / passport_name
         generate_passport(variables, passport_path)
+        _progress(88, "Generating passport…")
 
         generated_files = [
             _generated_file_record(xlsx_path, 'excel'),
@@ -1368,6 +1378,7 @@ def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=Non
         photos=stored_photos,
         created_by=created_by,
     )
+    _progress(98, "Saving to database…")
 
     return {
         'success': True,

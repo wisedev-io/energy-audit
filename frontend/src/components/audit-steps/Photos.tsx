@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
 
 const BASE_URL = 'http://157.180.28.98:5050';
@@ -44,6 +45,8 @@ export interface PhotoItem {
   etaSecs?: number;
 }
 
+const MAX_CONCURRENT = 6;
+
 function makeId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
@@ -52,6 +55,47 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Compress a photo to 1200px wide at 75% JPEG quality.
+ * On web, skip compression if the URI is a data: URI (e.g. HEIC SVG placeholder).
+ * Returns { uri, mimeType, fileName }.
+ */
+async function compressPhoto(
+  a: { uri: string; fileName?: string; mimeType?: string }
+): Promise<{ uri: string; mimeType: string; fileName: string }> {
+  const origFileName = a.fileName || a.uri.split('/').pop() || 'photo.jpg';
+
+  // Skip compression for data: URIs (HEIC SVG placeholder on web)
+  if (a.uri.startsWith('data:')) {
+    return {
+      uri: a.uri,
+      mimeType: a.mimeType || 'image/jpeg',
+      fileName: origFileName,
+    };
+  }
+
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      a.uri,
+      [{ resize: { width: 1200 } }],
+      { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    const baseName = origFileName.replace(/\.[^.]+$/, '') || 'photo';
+    return {
+      uri: result.uri,
+      mimeType: 'image/jpeg',
+      fileName: `${baseName}.jpg`,
+    };
+  } catch {
+    // Fallback: return original
+    return {
+      uri: a.uri,
+      mimeType: a.mimeType || 'image/jpeg',
+      fileName: origFileName,
+    };
+  }
 }
 
 export default function Photos({ data, updateData, embedded }: any) {
@@ -80,35 +124,29 @@ export default function Photos({ data, updateData, embedded }: any) {
   const [activeSection, setActiveSection] = useState(photoSections[0].id);
   const xhrRefs = useRef<Record<string, XMLHttpRequest>>({});
 
+  // Concurrency tracking
+  const activeUploadCount = useRef(0);
+  const pendingQueue = useRef<Array<{ sectionId: string; item: PhotoItem }>>([]);
+
   // Notify parent — preserve sections managed by other steps
   const notifyParent = (items: Record<string, PhotoItem[]>) => {
     updateData({ photoItems: { ...(data.photoItems || {}), ...items } });
   };
 
-  // Re-upload any locally-added photos that lost their server key (e.g. after a hot-reload).
-  // Skip photos marked isExisting — those are already in the DB and don't need re-uploading.
-  useEffect(() => {
-    const items = { ...photoItems };
-    let changed = false;
-    for (const [sec, list] of Object.entries(items)) {
-      list.forEach((item, idx) => {
-        if (!item.serverKey && !item.uploading && !item.isExisting && item.uri) {
-          changed = true;
-          startUpload(items, sec, idx);
-        }
-      });
-    }
-    if (changed) setPhotoItems({ ...items });
-  }, []); // only on mount
+  const markError = (sectionId: string, itemId: string, error: string) => {
+    setPhotoItems(prev => {
+      const list = [...(prev[sectionId] || [])];
+      const i = list.findIndex(p => p.id === itemId);
+      if (i < 0) return prev;
+      list[i] = { ...list[i], uploading: false, progress: 0, error };
+      return { ...prev, [sectionId]: list };
+    });
+  };
 
-  const startUpload = (
-    items: Record<string, PhotoItem[]>,
-    sectionId: string,
-    idx: number
-  ) => {
-    const item = items[sectionId]?.[idx];
-    if (!item || item.uploading || item.serverKey) return;
+  // Forward declaration via ref so doXHRUpload can call processQueue
+  const processQueueRef = useRef<(() => void) | null>(null);
 
+  const doXHRUpload = useCallback((sectionId: string, item: PhotoItem) => {
     const xhrKey = `${sectionId}_${item.id}`;
     const xhr = new XMLHttpRequest();
     xhrRefs.current[xhrKey] = xhr;
@@ -137,6 +175,7 @@ export default function Photos({ data, updateData, embedded }: any) {
 
     xhr.onload = () => {
       delete xhrRefs.current[xhrKey];
+      activeUploadCount.current--;
       try {
         const json = JSON.parse(xhr.responseText);
         if (json.key) {
@@ -144,7 +183,14 @@ export default function Photos({ data, updateData, embedded }: any) {
             const list = [...(prev[sectionId] || [])];
             const i = list.findIndex(p => p.id === item.id);
             if (i < 0) return prev;
-            list[i] = { ...list[i], serverKey: json.key, progress: 100, uploading: false, totalBytes: json.size || list[i].totalBytes, loadedBytes: json.size || list[i].totalBytes };
+            list[i] = {
+              ...list[i],
+              serverKey: json.key,
+              progress: 100,
+              uploading: false,
+              totalBytes: json.size || list[i].totalBytes,
+              loadedBytes: json.size || list[i].totalBytes,
+            };
             const updated = { ...prev, [sectionId]: list };
             notifyParent(updated);
             return updated;
@@ -155,106 +201,176 @@ export default function Photos({ data, updateData, embedded }: any) {
       } catch {
         markError(sectionId, item.id, 'Server error');
       }
+      processQueueRef.current?.();
     };
 
     xhr.onerror = () => {
       delete xhrRefs.current[xhrKey];
+      activeUploadCount.current--;
       markError(sectionId, item.id, 'Network error');
+      processQueueRef.current?.();
     };
 
-    // Mark as uploading
-    items[sectionId][idx] = { ...item, uploading: true, progress: 0, error: undefined };
+    xhr.open('POST', `${BASE_URL}/upload_photo`);
 
-    // On web, item.uri is a blob: URL with no extension — use fileName from picker if available
+    // Determine file details from item (already compressed)
     const filename = item.fileName || item.uri.split('/').pop() || 'photo.jpg';
     const ext = filename.split('.').pop()?.toLowerCase() || 'jpg';
-    // Also inspect the URI path itself — on iOS, fileName may report .jpg while the URI still points to a .heic file
     const uriBasename = item.uri.split('/').pop() || '';
     const uriExt = uriBasename.split('.').pop()?.toLowerCase() || '';
-    // HEIC detection: check extension (both filename and URI) AND mimeType.
-    // Extension takes priority — iOS sometimes reports 'image/jpeg' mimeType for HEIC files.
+    // HEIC detection — only relevant for non-compressed items or fallback
     const isHeicFile =
       ext === 'heic' || ext === 'heif' ||
       uriExt === 'heic' || uriExt === 'heif' ||
       (item.mimeType || '').toLowerCase().includes('heic') ||
       (item.mimeType || '').toLowerCase().includes('heif');
-    const mimeType = isHeicFile
-      ? 'image/heic'
-      : (item.mimeType || (ext === 'png' ? 'image/png' : 'image/jpeg'));
 
-    xhr.open('POST', `${BASE_URL}/upload_photo`);
+    // After compression, mimeType is set to 'image/jpeg' for native.
+    // Use item.mimeType if set (from compressPhoto), else derive from extension.
+    const mimeType = item.mimeType && !isHeicFile
+      ? item.mimeType
+      : (isHeicFile ? 'image/heic' : (ext === 'png' ? 'image/png' : 'image/jpeg'));
 
     if (Platform.OS === 'web') {
+      // On web, item.uri may be a blob: URL; use _originalUri if available
       const uploadUri = (item as any)._originalUri || item.uri;
       fetch(uploadUri)
         .then(r => r.blob())
         .then(blob => {
-          // On web, browser converts HEIC to JPEG automatically — always send as JPEG
+          // On web, always send as JPEG (browser converts HEIC automatically)
           const finalFilename = filename.replace(/\.[^.]+$/, '.jpg');
           const typedBlob = new Blob([blob], { type: 'image/jpeg' });
           const fd = new FormData();
           fd.append('photo', typedBlob, finalFilename);
           xhr.send(fd);
         })
-        .catch(() => markError(sectionId, item.id, 'Failed to read image'));
+        .catch(() => {
+          activeUploadCount.current--;
+          markError(sectionId, item.id, 'Failed to read image');
+          processQueueRef.current?.();
+        });
     } else {
       const fd = new FormData();
       fd.append('photo', { uri: item.uri, name: filename, type: mimeType } as any);
       xhr.send(fd);
     }
-  };
+  }, []);
 
-  const markError = (sectionId: string, itemId: string, error: string) => {
-    setPhotoItems(prev => {
-      const list = [...(prev[sectionId] || [])];
-      const i = list.findIndex(p => p.id === itemId);
-      if (i < 0) return prev;
-      list[i] = { ...list[i], uploading: false, progress: 0, error };
-      return { ...prev, [sectionId]: list };
-    });
-  };
+  const processQueue = useCallback(() => {
+    while (activeUploadCount.current < MAX_CONCURRENT && pendingQueue.current.length > 0) {
+      const next = pendingQueue.current.shift()!;
+      activeUploadCount.current++;
+      // Mark as uploading in state
+      setPhotoItems(prev => {
+        const list = [...(prev[next.sectionId] || [])];
+        const idx = list.findIndex(p => p.id === next.item.id);
+        if (idx < 0) {
+          activeUploadCount.current--;
+          return prev;
+        }
+        list[idx] = { ...list[idx], uploading: true, progress: 0, error: undefined };
+        return { ...prev, [next.sectionId]: list };
+      });
+      // Start XHR (pass item object for URI/name/type since it may not be in state yet)
+      doXHRUpload(next.sectionId, next.item);
+    }
+  }, [doXHRUpload]);
+
+  // Keep processQueueRef in sync so doXHRUpload callbacks can call it
+  useEffect(() => {
+    processQueueRef.current = processQueue;
+  }, [processQueue]);
+
+  // Re-upload any locally-added photos that lost their server key (e.g. after a hot-reload).
+  // Skip photos marked isExisting — those are already in the DB and don't need re-uploading.
+  useEffect(() => {
+    const items = { ...photoItems };
+    let changed = false;
+    for (const [sec, list] of Object.entries(items)) {
+      list.forEach((item) => {
+        if (!item.serverKey && !item.uploading && !item.isExisting && item.uri) {
+          changed = true;
+          pendingQueue.current.push({ sectionId: sec, item });
+        }
+      });
+    }
+    if (changed) {
+      setPhotoItems({ ...items });
+      processQueue();
+    }
+  }, []); // only on mount
 
   const retryUpload = (sectionId: string, itemId: string) => {
     setPhotoItems(prev => {
       const list = [...(prev[sectionId] || [])];
       const idx = list.findIndex(p => p.id === itemId);
       if (idx < 0) return prev;
-      list[idx] = { ...list[idx], error: undefined, uploading: false, serverKey: undefined, progress: 0 };
+      const item = { ...list[idx], error: undefined, uploading: false, serverKey: undefined, progress: 0 };
+      list[idx] = item;
       const updated = { ...prev, [sectionId]: list };
-      startUpload(updated, sectionId, idx);
+      // Enqueue back and process
+      pendingQueue.current.push({ sectionId, item });
+      processQueue();
       return updated;
     });
   };
 
-  const addPhotos = (sectionId: string, assets: Array<{ uri: string; fileName?: string; mimeType?: string }>) => {
-    setPhotoItems(prev => {
-      const existing = prev[sectionId] || [];
-      const newItems: PhotoItem[] = assets.map(a => {
+  const addPhotos = async (sectionId: string, assets: Array<{ uri: string; fileName?: string; mimeType?: string }>) => {
+    // Compress each photo before adding
+    const compressedAssets = await Promise.all(
+      assets.map(async (a) => {
         const isHeic = a.mimeType?.includes('heic') || a.mimeType?.includes('heif') ||
           a.fileName?.toLowerCase().endsWith('.heic') || a.fileName?.toLowerCase().endsWith('.heif');
         // For HEIC on web, use a grey placeholder since browser can't display HEIC
-        const displayUri = (Platform.OS === 'web' && isHeic)
+        const isWebHeicPlaceholder = Platform.OS === 'web' && isHeic;
+        const displayUri = isWebHeicPlaceholder
           ? 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23e5e7eb"/><text x="50" y="55" text-anchor="middle" font-size="12" fill="%236b7280">HEIC</text></svg>'
           : a.uri;
+        // Compress the real URI (not the SVG placeholder)
+        const compressed = await compressPhoto({ uri: a.uri, fileName: a.fileName, mimeType: a.mimeType });
+        return {
+          originalUri: a.uri,
+          displayUri,
+          compressed,
+          isWebHeicPlaceholder,
+        };
+      })
+    );
+
+    setPhotoItems(prev => {
+      const existing = prev[sectionId] || [];
+      const newItems: PhotoItem[] = compressedAssets.map(ca => {
+        // On native: display and upload from the compressed URI
+        // On web HEIC: display SVG placeholder, upload from originalUri (web browser handles HEIC→JPEG)
+        // On web non-HEIC: display and upload from the compressed URI (or blob: URI)
+        const uploadUri = ca.isWebHeicPlaceholder ? ca.originalUri : ca.compressed.uri;
         return {
           id: makeId(),
-          uri: displayUri,
-          fileName: a.fileName,
-          mimeType: a.mimeType,
+          uri: ca.displayUri,        // What to show in the image thumbnail
+          fileName: ca.compressed.fileName,
+          mimeType: ca.compressed.mimeType,
           progress: 0,
           uploading: false,
           totalBytes: 0,
           loadedBytes: 0,
-          _originalUri: a.uri,
-        };
+          // On web, doXHRUpload fetches _originalUri (or item.uri) via blob fetch
+          // Pass the correct upload URI so doXHRUpload uses it
+          _originalUri: ca.isWebHeicPlaceholder ? ca.originalUri : uploadUri,
+          // Override display uri with compressed uri for native display
+          ...(Platform.OS !== 'web' ? { uri: ca.compressed.uri } : {}),
+        } as PhotoItem & { _originalUri?: string };
       });
+
       const updated = { ...prev, [sectionId]: [...existing, ...newItems] };
-      // Start uploads immediately
-      newItems.forEach((_, offset) => {
-        const idx = existing.length + offset;
-        startUpload(updated, sectionId, idx);
-      });
       notifyParent(updated);
+
+      // Enqueue each new item for upload
+      newItems.forEach(item => {
+        pendingQueue.current.push({ sectionId, item });
+      });
+      // Call processQueue after enqueueing via a microtask to let state settle
+      setTimeout(() => processQueue(), 0);
+
       return updated;
     });
   };
@@ -265,6 +381,10 @@ export default function Photos({ data, updateData, embedded }: any) {
       const xhrKey = `${sectionId}_${item.id}`;
       xhrRefs.current[xhrKey]?.abort();
       delete xhrRefs.current[xhrKey];
+      // Also remove from pending queue
+      pendingQueue.current = pendingQueue.current.filter(
+        q => !(q.sectionId === sectionId && q.item.id === itemId)
+      );
     }
     setPhotoItems(prev => {
       const updated = { ...prev, [sectionId]: (prev[sectionId] || []).filter(p => p.id !== itemId) };
@@ -299,7 +419,7 @@ export default function Photos({ data, updateData, embedded }: any) {
       {uploadingCount > 0 && (
         <View style={styles.globalProgress}>
           <ActivityIndicator size="small" color="#2563eb" />
-          <Text style={styles.globalProgressText}>Uploading {uploadingCount} photo{uploadingCount > 1 ? 's' : ''}… ({doneCount}/{totalCount} done)</Text>
+          <Text style={styles.globalProgressText}>Uploading {doneCount} / {totalCount}</Text>
         </View>
       )}
 

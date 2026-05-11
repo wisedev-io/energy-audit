@@ -83,6 +83,7 @@ export default function NewAuditScreen({ navigation, route }: any) {
   const [isStarted, setIsStarted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState('');
+  const [generateProgress, setGenerateProgress] = useState(0);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [successNotice, setSuccessNotice] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -348,14 +349,12 @@ export default function NewAuditScreen({ navigation, route }: any) {
 
     setIsSubmitting(true);
     setElapsedSecs(0);
+    setGenerateProgress(0);
     setSubmitProgress('Preparing submission…');
 
     elapsedTimerRef.current = setInterval(() => {
       setElapsedSecs(prev => prev + 1);
     }, 1000);
-
-    const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), 180000);
 
     try {
       const fd = new FormData();
@@ -405,56 +404,109 @@ export default function NewAuditScreen({ navigation, route }: any) {
       setSubmitProgress(`Generating reports with ${photoCount} photo(s)…`);
 
       const token = tokenRef.current || await AsyncStorage.getItem('auth_token') || '';
-      const response = await fetch(`${BASE_URL}/generate`, {
-        method: 'POST',
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-        body: fd,
-        signal: controller.signal,
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${BASE_URL}/generate`);
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+        xhr.timeout = 180000;
+
+        let lastParsedLength = 0;
+
+        xhr.onprogress = () => {
+          const text = xhr.responseText;
+          if (text.length <= lastParsedLength) return;
+          const newText = text.slice(lastParsedLength);
+          lastParsedLength = text.length;
+          const lines = newText.split('\n').filter(l => l.trim());
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line);
+              if (parsed.message) setSubmitProgress(parsed.message);
+              if (typeof parsed.progress === 'number') setGenerateProgress(parsed.progress);
+            } catch {
+              // ignore malformed lines
+            }
+          }
+        };
+
+        xhr.onload = () => {
+          // Parse the last JSON line for the final result
+          const text = xhr.responseText;
+          const lines = text.split('\n').filter(l => l.trim());
+          let json: any = null;
+          // Find the last line with done: true
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+              const parsed = JSON.parse(lines[i]);
+              if (parsed.done) {
+                json = parsed;
+                break;
+              }
+            } catch {
+              // continue
+            }
+          }
+          // Fallback: try last non-empty line
+          if (!json && lines.length > 0) {
+            try { json = JSON.parse(lines[lines.length - 1]); } catch { /* ignore */ }
+          }
+
+          if (!json) {
+            reject(new Error(`Server error (HTTP ${xhr.status}). Please try again.`));
+            return;
+          }
+
+          if (!json.success) {
+            reject(new Error(json.error || `Submission failed (HTTP ${xhr.status})`));
+            return;
+          }
+
+          const wasEdit = Boolean(formData.edit_case);
+          draftStorage.clearById(formData.draft_id || formData.case_number || '');
+          draftStorage.clearOnServer(tokenRef.current);
+          if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+          setIsSubmitting(false);
+          setSubmitProgress('');
+          setGenerateProgress(0);
+          setSuccessNotice(
+            wasEdit
+              ? `Audit "${json.case_name}" updated. Opening Folders...`
+              : `Audit "${json.case_name}" created. Opening Folders...`
+          );
+          if (successTimerRef.current) clearTimeout(successTimerRef.current);
+          successTimerRef.current = setTimeout(() => {
+            setSuccessNotice('');
+            editConsumedRef.current = null;
+            setFormData({});
+            setCurrentStep(1);
+            setIsStarted(false);
+            setAllDrafts([]);
+            navigation.navigate('Folders');
+          }, 2000);
+          resolve();
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Cannot reach server'));
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error('Request timed out. Check your connection and try again.'));
+        };
+
+        xhr.send(fd);
       });
-      clearTimeout(abortTimer);
-
-      let json: any;
-      try {
-        json = await response.json();
-      } catch {
-        throw new Error(`Server error (HTTP ${response.status}). Please try again.`);
-      }
-
-      if (!json.success) {
-        throw new Error(json.error || `Submission failed (HTTP ${response.status})`);
-      }
-
-      const wasEdit = Boolean(formData.edit_case);
-      draftStorage.clearById(formData.draft_id || formData.case_number || '');
-      draftStorage.clearOnServer(tokenRef.current);
-      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
-      setIsSubmitting(false);
-      setSubmitProgress('');
-      setSuccessNotice(
-        wasEdit
-          ? `Audit "${json.case_name}" updated. Opening Folders...`
-          : `Audit "${json.case_name}" created. Opening Folders...`
-      );
-      if (successTimerRef.current) clearTimeout(successTimerRef.current);
-      successTimerRef.current = setTimeout(() => {
-        setSuccessNotice('');
-        editConsumedRef.current = null;
-        setFormData({});
-        setCurrentStep(1);
-        setIsStarted(false);
-        setAllDrafts([]);
-        navigation.navigate('Folders');
-      }, 2000);
     } catch (err: any) {
-      clearTimeout(abortTimer);
-      const msg = err.name === 'AbortError'
-        ? 'Request timed out. Check your connection and try again.'
-        : (err.message || 'Cannot reach server');
+      const msg = err.message || 'Cannot reach server';
       setSubmitError(msg);
     } finally {
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
       setIsSubmitting(false);
       setSubmitProgress('');
+      setGenerateProgress(0);
     }
   };
 
@@ -706,6 +758,11 @@ export default function NewAuditScreen({ navigation, route }: any) {
           <View style={styles.overlayCard}>
             <ActivityIndicator size="large" color={Colors.success} />
             <Text style={styles.overlayTitle}>Generating Reports…</Text>
+            {generateProgress > 0 && (
+              <View style={styles.progressBarBg}>
+                <View style={[styles.progressBarFill, { width: `${generateProgress}%` as any }]} />
+              </View>
+            )}
             <Text style={styles.overlayProgress}>{submitProgress}</Text>
             <Text style={styles.overlayElapsed}>{elapsedSecs}s elapsed</Text>
           </View>
@@ -908,6 +965,18 @@ const styles = StyleSheet.create({
     width: '100%', ...Shadow.lg,
   },
   overlayTitle: { fontSize: 18, fontWeight: '700', color: Colors.text, marginTop: Space.sm },
+  progressBarBg: {
+    width: '100%',
+    height: 6,
+    backgroundColor: Colors.border,
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: 6,
+    backgroundColor: Colors.success,
+    borderRadius: Radius.pill,
+  },
   overlayProgress: { fontSize: 14, color: Colors.textSec, textAlign: 'center' },
   overlayElapsed: { fontSize: 13, color: Colors.success, fontWeight: '600' },
   successCard: {
