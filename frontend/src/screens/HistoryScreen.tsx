@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
-  ActivityIndicator, RefreshControl, Linking, Alert, Modal, Animated, Easing,
+  ActivityIndicator, RefreshControl, Linking, Alert, Modal, Animated, Easing, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -121,6 +121,7 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [myOnly, setMyOnly] = useState(false);
   const [localDraft, setLocalDraft] = useState<AuditDraft | null>(null);
+  const [photoErrors, setPhotoErrors] = useState<Set<string>>(new Set());
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const spinLoopRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -343,9 +344,20 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
                 {/* Card header */}
                 <View style={styles.auditCardHeader}>
                   <View style={styles.auditIconWrap}>
-                    <Text style={styles.auditInitials}>
-                      {(audit.owner || '??').replace(/[^a-zA-ZЀ-ӿ]/g, '').slice(0, 2).toUpperCase()}
-                    </Text>
+                    {!photoErrors.has(audit.name) ? (
+                      <Image
+                        source={{ uri: `${BASE_URL}/cases/${encodeURIComponent(audit.name)}/photos/1/1` }}
+                        style={styles.auditPhoto}
+                        onError={() => setPhotoErrors(prev => new Set([...prev, audit.name]))}
+                        resizeMode="cover"
+                      />
+                    ) : (audit.owner || '').replace(/[^a-zA-ZЀ-ӿ]/g, '').length > 0 ? (
+                      <Text style={styles.auditInitials}>
+                        {(audit.owner || '').replace(/[^a-zA-ZЀ-ӿ]/g, '').slice(0, 2).toUpperCase()}
+                      </Text>
+                    ) : (
+                      <Ionicons name="business-outline" size={36} color={Colors.primary} />
+                    )}
                   </View>
                   <View style={styles.auditMeta}>
                     <Text style={styles.auditName} numberOfLines={1}>{audit.name}</Text>
@@ -584,18 +596,20 @@ const styles = StyleSheet.create({
   },
   auditCardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Space.md, gap: Space.md },
   auditIconWrap: {
-    width: 42,
-    height: 42,
+    width: 84,
+    height: 84,
     borderRadius: Radius.md,
     backgroundColor: Colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+    overflow: 'hidden',
   },
+  auditPhoto: { width: 84, height: 84 },
   auditMeta: { flex: 1 },
   auditName: { fontSize: 14, fontWeight: '700', color: Colors.text },
   auditOwner: { fontSize: 13, color: Colors.textSec, marginTop: 2 },
-  auditInitials: { fontSize: 15, fontWeight: '800', color: Colors.primary },
+  auditInitials: { fontSize: 28, fontWeight: '800', color: Colors.primary },
   auditDateWrap: { alignItems: 'flex-end', flexShrink: 0 },
   auditDateLabel: { fontSize: 10, color: Colors.textMuted },
   auditDateEdited: { fontSize: 10, color: Colors.orange, marginTop: 1 },

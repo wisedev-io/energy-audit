@@ -35,6 +35,17 @@
       "presentation": {
         "panel": "new"
       }
+    },
+    {
+      "label": "Build APK",
+      "type": "shell",
+      "command": "cd ~/energy-audit/frontend && npx eas build --profile preview --platform android --non-interactive",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "problemMatcher": []
     }
   ]
 }

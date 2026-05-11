@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  Alert, TextInput, ActivityIndicator,
+  Alert, TextInput, ActivityIndicator, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow, Space } from '../theme';
 
 const BASE_URL = 'http://157.180.28.98:5050';
+const APK_URL = 'https://expo.dev/artifacts/eas/hcz2i6RVpT9HcihwDyupfU.apk';
 
 function AvatarLetters({ name }: { name: string }) {
   const initials = name
@@ -258,6 +259,14 @@ export default function SettingsScreen({ onLogout, user }: { onLogout: () => voi
             label="App Version"
             value="Energy Audit v1.0.0"
             chevron={false}
+          />
+          <SettingRow
+            icon="download-outline"
+            iconColor="#10b981"
+            iconBg="#d1fae5"
+            label="Download Latest APK"
+            value="Android"
+            onPress={() => Linking.openURL(APK_URL)}
             last
           />
         </View>
