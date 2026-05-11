@@ -34,8 +34,9 @@ const photoSections = [
 
 interface PhotoItem {
   id: string;
-  uri: string;          // local compressed URI while uploading, server URL after
+  uri: string;          // local URI while uploading, server URL after
   fileName: string;
+  mimeType?: string;    // stored to distinguish HEIC from JPEG on web
   secId: number;
   slotNo?: number;      // set after server confirms upload
   uploading: boolean;
@@ -61,7 +62,9 @@ async function compressPhoto(
 ): Promise<{ uri: string; mimeType: string; fileName: string; isPlaceholder: boolean }> {
   const origFileName = a.fileName || a.uri.split('/').pop() || 'photo.jpg';
 
-  // Web HEIC: browser cannot render HEIC, show placeholder; actual JPEG comes from server
+  // Web HEIC: browser can't compress HEIC — pass original blob URL as-is so server can convert.
+  // Safari renders HEIC natively for preview; other browsers show broken image until upload completes
+  // and the server URL (JPEG) replaces it.
   if (Platform.OS === 'web') {
     const isHeic = (a.mimeType || '').toLowerCase().includes('heic') ||
       (a.mimeType || '').toLowerCase().includes('heif') ||
@@ -69,10 +72,10 @@ async function compressPhoto(
       origFileName.toLowerCase().endsWith('.heif');
     if (isHeic) {
       return {
-        uri: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23e5e7eb"/><text x="50" y="55" text-anchor="middle" font-size="12" fill="%236b7280">HEIC</text></svg>',
+        uri: a.uri,  // original blob URL — Safari shows the photo; other browsers show broken until upload done
         mimeType: 'image/heic',
         fileName: origFileName,
-        isPlaceholder: true,
+        isPlaceholder: false,
       };
     }
   }
@@ -177,8 +180,6 @@ export default function Photos({ data, updateData, embedded }: any) {
 
     xhr.upload.onprogress = (e) => {
       if (!e.lengthComputable) return;
-      const elapsed = (Date.now() - startTime) / 1000 || 0.001;
-      const speed = e.loaded / elapsed;
       const pct = Math.round((e.loaded / e.total) * 100);
       updateItem(item.id, { progress: pct, loadedBytes: e.loaded, totalBytes: e.total });
     };
@@ -214,13 +215,18 @@ export default function Photos({ data, updateData, embedded }: any) {
     xhr.open('POST', uploadUrl);
 
     if (Platform.OS === 'web') {
-      // On web fetch the original blob (before compression/placeholder substitution)
-      fetch(isPlaceholder ? item.uri : originalUri)
+      const isHeicFile = (item.mimeType || '').includes('heic') || (item.mimeType || '').includes('heif') ||
+        item.fileName.toLowerCase().endsWith('.heic') || item.fileName.toLowerCase().endsWith('.heif');
+      // HEIC: upload original file so server can convert to JPEG.
+      // Non-HEIC: upload the compressed data URI result (item.uri) — smaller file, faster transfer.
+      const fetchUri = isHeicFile ? originalUri : item.uri;
+      fetch(fetchUri)
         .then(r => r.blob())
         .then(blob => {
           const fd = new FormData();
-          const fname = item.fileName.replace(/\.[^.]+$/, '.jpg');
-          fd.append('photo', new Blob([blob], { type: 'image/jpeg' }), fname);
+          // Keep .heic extension so server detects and converts; force .jpg for compressed images.
+          const fname = isHeicFile ? item.fileName : (item.fileName.replace(/\.[^.]+$/, '') || 'photo') + '.jpg';
+          fd.append('photo', blob, fname);
           xhr.send(fd);
         })
         .catch(() => {
@@ -244,6 +250,7 @@ export default function Photos({ data, updateData, embedded }: any) {
       id: makeId(),
       uri: c.uri,
       fileName: c.fileName,
+      mimeType: c.mimeType,
       secId,
       slotNo: undefined,
       uploading: true,
@@ -360,14 +367,7 @@ export default function Photos({ data, updateData, embedded }: any) {
         <View style={styles.photoGrid}>
           {currentItems.map((item) => (
             <View key={item.id} style={styles.photoContainer}>
-              {item.uri.startsWith('data:image/svg') ? (
-                <View style={[styles.photo, styles.heicPlaceholder, item.uploading && styles.photoDim]}>
-                  <Ionicons name="image-outline" size={28} color="#9ca3af" />
-                  <Text style={styles.heicPlaceholderText}>HEIC</Text>
-                </View>
-              ) : (
-                <Image source={{ uri: item.uri }} style={[styles.photo, item.uploading && styles.photoDim]} />
-              )}
+              <Image source={{ uri: item.uri }} style={[styles.photo, item.uploading && styles.photoDim]} />
 
               {/* Upload progress overlay — shown only while uploading */}
               {item.uploading && (
@@ -461,6 +461,4 @@ const styles = StyleSheet.create({
   addPhotoButton: { flex: 1, backgroundColor: '#f3f4f6', borderWidth: 2, borderColor: '#e5e7eb', borderStyle: 'dashed', borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   addPhotoText: { fontSize: 10, color: '#6b7280', marginTop: 4 },
   requirement: { fontSize: 12, color: '#6b7280', marginTop: 12 },
-  heicPlaceholder: { backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  heicPlaceholderText: { fontSize: 10, color: '#9ca3af', fontWeight: '600' },
 });

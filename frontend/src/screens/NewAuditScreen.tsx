@@ -194,15 +194,16 @@ export default function NewAuditScreen({ navigation, route }: any) {
     editConsumedRef.current = null;
     setAllDrafts([]);
     navigation.setParams({ startFresh: null });
+    const sid = generateSessionId();
     fetch(`${BASE_URL}/next-case-number`)
       .then(r => r.json())
       .then(json => {
         const id = json.case_number || `draft_${Date.now()}`;
-        setFormData({ ...buildDefaults(json.case_number), draft_id: id });
+        setFormData({ ...buildDefaults(json.case_number), draft_id: id, session_id: sid });
       })
       .catch(() => {
         const id = `draft_${Date.now()}`;
-        setFormData({ ...buildDefaults(), draft_id: id });
+        setFormData({ ...buildDefaults(), draft_id: id, session_id: sid });
       })
       .finally(() => {
         setCurrentStep(1);
@@ -284,24 +285,28 @@ export default function NewAuditScreen({ navigation, route }: any) {
     }
   };
 
-  // Resume an existing draft
+  // Resume an existing draft — ensure a session_id exists for photo uploads
   const handleResumeDraft = (draft: AuditDraft) => {
-    setFormData(draft.formData);
+    const data = draft.formData.session_id
+      ? draft.formData
+      : { ...draft.formData, session_id: generateSessionId() };
+    setFormData(data);
     setCurrentStep(draft.step);
     scrollToDraftStepRef.current = draft.step;
     setIsStarted(true);
   };
 
   const doStartNew = () => {
+    const sid = generateSessionId();
     fetch(`${BASE_URL}/next-case-number`)
       .then(r => r.json())
       .then(json => {
         const id = json.case_number || `draft_${Date.now()}`;
-        setFormData({ ...buildDefaults(json.case_number), draft_id: id });
+        setFormData({ ...buildDefaults(json.case_number), draft_id: id, session_id: sid });
       })
       .catch(() => {
         const id = `draft_${Date.now()}`;
-        setFormData({ ...buildDefaults(), draft_id: id });
+        setFormData({ ...buildDefaults(), draft_id: id, session_id: sid });
       })
       .finally(() => {
         setCurrentStep(1);
