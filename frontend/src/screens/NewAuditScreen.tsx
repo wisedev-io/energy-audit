@@ -41,6 +41,7 @@ export default function NewAuditScreen({ navigation, route }: any) {
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [successNotice, setSuccessNotice] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [submitError, setSubmitError] = useState('');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -106,6 +107,7 @@ export default function NewAuditScreen({ navigation, route }: any) {
     draftStorage.clear();
     draftStorage.clearOnServer(tokenRef.current);
     draftPromptShownRef.current = true;
+    editConsumedRef.current = null;
     navigation.setParams({ startFresh: null });
     fetch(`${BASE_URL}/next-case-number`)
       .then(r => r.json())
@@ -210,6 +212,7 @@ export default function NewAuditScreen({ navigation, route }: any) {
       setCurrentStep(prevStep);
       saveDraft(formData, prevStep);
     } else {
+      editConsumedRef.current = null;
       setIsStarted(false);
       draftPromptShownRef.current = false;
     }
@@ -222,11 +225,14 @@ export default function NewAuditScreen({ navigation, route }: any) {
   };
 
   const handleSubmit = async () => {
+    console.log('handleSubmit called, formData keys:', Object.keys(formData));
+    setSubmitError('');
+
     const photoItems = formData.photoItems as Record<string, any[]> | undefined;
     if (photoItems) {
       const uploading = Object.values(photoItems).flat().filter((p: any) => p.uploading);
       if (uploading.length > 0) {
-        Alert.alert('Photos still uploading', `${uploading.length} photo(s) are still uploading. Please wait.`);
+        setSubmitError(`${uploading.length} photo(s) are still uploading. Please wait.`);
         return;
       }
     }
@@ -238,6 +244,9 @@ export default function NewAuditScreen({ navigation, route }: any) {
     elapsedTimerRef.current = setInterval(() => {
       setElapsedSecs(prev => prev + 1);
     }, 1000);
+
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 180000); // 3-min timeout
 
     try {
       const fd = new FormData();
@@ -271,7 +280,6 @@ export default function NewAuditScreen({ navigation, route }: any) {
       });
 
       let photoCount = 0;
-      console.log('DEBUG photoItems:', JSON.stringify(photoItems).slice(0, 1000));
       if (photoItems) {
         for (const [sectionId, items] of Object.entries(photoItems)) {
           const secId = SECTION_SEC_ID[sectionId];
@@ -292,35 +300,52 @@ export default function NewAuditScreen({ navigation, route }: any) {
         method: 'POST',
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
         body: fd,
+        signal: controller.signal,
       });
-      const json = await response.json();
+      clearTimeout(abortTimer);
 
-      if (json.success) {
-        const wasEdit = Boolean(formData.edit_case);
-        draftStorage.clear();
-        draftStorage.clearOnServer(tokenRef.current);
-        if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
-        setIsSubmitting(false);
-        setSubmitProgress('');
-        setSuccessNotice(
-          wasEdit
-            ? `Audit "${json.case_name}" updated. Opening Folders...`
-            : `Audit "${json.case_name}" created. Opening Folders...`
-        );
-        if (successTimerRef.current) clearTimeout(successTimerRef.current);
-        successTimerRef.current = setTimeout(() => {
-          setSuccessNotice('');
-          setFormData({});
-          setCurrentStep(1);
-          setIsStarted(false);
-          draftPromptShownRef.current = false;
-          navigation.navigate('Folders');
-        }, 2000);
-      } else {
-        Alert.alert('Error', json.error || 'Submission failed');
+      console.log('Server response status:', response.status);
+      let json: any;
+      try {
+        json = await response.json();
+      } catch {
+        throw new Error(`Server error (HTTP ${response.status}). Please try again.`);
       }
+      console.log('Server response json:', JSON.stringify(json));
+
+      if (!json.success) {
+        console.error('Server error:', json.error);
+        throw new Error(json.error || `Submission failed (HTTP ${response.status})`);
+      }
+
+      const wasEdit = Boolean(formData.edit_case);
+      draftStorage.clear();
+      draftStorage.clearOnServer(tokenRef.current);
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+      setIsSubmitting(false);
+      setSubmitProgress('');
+      setSuccessNotice(
+        wasEdit
+          ? `Audit "${json.case_name}" updated. Opening Folders...`
+          : `Audit "${json.case_name}" created. Opening Folders...`
+      );
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      successTimerRef.current = setTimeout(() => {
+        setSuccessNotice('');
+        editConsumedRef.current = null;
+        setFormData({});
+        setCurrentStep(1);
+        setIsStarted(false);
+        draftPromptShownRef.current = false;
+        navigation.navigate('Folders');
+      }, 2000);
     } catch (err: any) {
-      Alert.alert('Connection Error', `Cannot reach server: ${err.message}`);
+      clearTimeout(abortTimer);
+      console.error('Submit error:', err);
+      const msg = err.name === 'AbortError'
+        ? 'Request timed out. Check your connection and try again.'
+        : (err.message || 'Cannot reach server');
+      setSubmitError(msg);
     } finally {
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
       setIsSubmitting(false);
@@ -480,6 +505,17 @@ export default function NewAuditScreen({ navigation, route }: any) {
         )}
       </View>
 
+      {/* Visible error banner (Alert.alert is silent on web) */}
+      {submitError ? (
+        <View style={styles.submitErrorBar}>
+          <Ionicons name="alert-circle" size={18} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.submitErrorText}>{submitError}</Text>
+          <TouchableOpacity onPress={() => setSubmitError('')}>
+            <Ionicons name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {/* Submitting overlay */}
       <Modal visible={isSubmitting} transparent animationType="fade">
         <View style={styles.overlayBg}>
@@ -615,6 +651,14 @@ const styles = StyleSheet.create({
   nextButtonText: { fontSize: 16, fontWeight: '600', color: '#fff' },
   submitButton: { backgroundColor: '#10b981' },
   submitButtonInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
+  submitErrorBar: {
+    backgroundColor: '#ef4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  submitErrorText: { color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 },
   overlayBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 32 },
   overlayCard: { backgroundColor: '#fff', borderRadius: 20, padding: 32, alignItems: 'center', gap: 12, width: '100%' },
   overlayTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginTop: 8 },

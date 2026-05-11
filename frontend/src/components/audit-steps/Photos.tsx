@@ -35,6 +35,7 @@ export interface PhotoItem {
   fileName?: string;
   mimeType?: string;
   serverKey?: string;
+  isExisting?: boolean;    // true = restored from DB on edit, skip re-upload
   progress: number;        // 0–100
   uploading: boolean;
   error?: string;
@@ -53,7 +54,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function Photos({ data, updateData }: any) {
+export default function Photos({ data, updateData, embedded }: any) {
   const initItems = (): Record<string, PhotoItem[]> => {
     if (data.photoItems) return data.photoItems;
     // Restore from old plain URI format if present
@@ -84,13 +85,14 @@ export default function Photos({ data, updateData }: any) {
     updateData({ photoItems: { ...(data.photoItems || {}), ...items } });
   };
 
-  // Re-upload any restored photos that lost their server key
+  // Re-upload any locally-added photos that lost their server key (e.g. after a hot-reload).
+  // Skip photos marked isExisting — those are already in the DB and don't need re-uploading.
   useEffect(() => {
     const items = { ...photoItems };
     let changed = false;
     for (const [sec, list] of Object.entries(items)) {
       list.forEach((item, idx) => {
-        if (!item.serverKey && !item.uploading && item.uri) {
+        if (!item.serverKey && !item.uploading && !item.isExisting && item.uri) {
           changed = true;
           startUpload(items, sec, idx);
         }
@@ -291,8 +293,9 @@ export default function Photos({ data, updateData }: any) {
   const totalCount = Object.values(photoItems).flat().length;
   const doneCount = Object.values(photoItems).flat().filter(p => !!p.serverKey).length;
 
+  const Wrapper: any = embedded ? View : ScrollView;
   return (
-    <ScrollView style={styles.container}>
+    <Wrapper style={styles.container}>
       {uploadingCount > 0 && (
         <View style={styles.globalProgress}>
           <ActivityIndicator size="small" color="#2563eb" />
@@ -405,7 +408,7 @@ export default function Photos({ data, updateData }: any) {
           </Text>
         )}
       </View>
-    </ScrollView>
+    </Wrapper>
   );
 }
 

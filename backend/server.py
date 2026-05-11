@@ -299,7 +299,46 @@ def get_case_form(case_name):
         return _error_response(str(exc), 500)
     if form_data is None:
         return jsonify({"error": "form data not found"}), 404
-    return jsonify(form_data)
+
+    result = dict(form_data)
+    try:
+        photos = get_storage().get_case_photos(case_name)
+        result["_photos"] = [
+            {"sec_id": sec_id, "slot_no": slot_no, "filename": upload.filename}
+            for (sec_id, slot_no), upload in sorted(photos.items())
+        ]
+    except Exception:
+        result["_photos"] = []
+
+    return jsonify(result)
+
+
+@app.route("/cases/<case_name>/photos/<int:sec_id>/<int:slot_no>", methods=["GET"])
+def get_case_photo(case_name, sec_id, slot_no):
+    try:
+        storage = get_storage()
+        with storage._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT p.content, p.mime_type, p.filename
+                    FROM case_photos p
+                    JOIN cases c ON c.id = p.case_id
+                    WHERE c.case_name = %s AND p.sec_id = %s AND p.slot_no = %s
+                    """,
+                    (case_name, sec_id, slot_no),
+                )
+                row = cur.fetchone()
+        if not row:
+            return _error_response("Photo not found", 404)
+        return send_file(
+            io.BytesIO(row["content"]),
+            mimetype=row["mime_type"] or "image/jpeg",
+            as_attachment=False,
+            download_name=row["filename"],
+        )
+    except StorageError as exc:
+        return _error_response(str(exc), 500)
 
 
 @app.route("/cases/<case_name>/<filename>", methods=["GET"])

@@ -297,10 +297,21 @@ def _col_width_from_tblGrid(table, col_idx):
     return None
 
 def _insert_image_in_cell(cell, img_path, table=None, col_idx=0, width_in=None):
-    """Insert image scaled to fit cell width (never exceeds cell, may be slightly narrower)."""
-    from PIL import Image as PilImage
+    """Insert image scaled to fill cell width exactly."""
+    import traceback
+
+    img_path_obj = Path(img_path)
+    if not img_path_obj.exists():
+        print(f"⚠ _insert_image_in_cell: file does not exist: {img_path}")
+        return
+
+    file_size = img_path_obj.stat().st_size
+    if file_size == 0:
+        print(f"⚠ _insert_image_in_cell: file is empty (0 bytes): {img_path}")
+        return
 
     try:
+        # Priority: explicit width → cell XML → tblGrid → fallback
         w = width_in
         if w is None:
             w = _cell_actual_width_inches(cell)
@@ -310,21 +321,9 @@ def _insert_image_in_cell(cell, img_path, table=None, col_idx=0, width_in=None):
             w = _cell_content_width_inches(table, col_idx)
         if w is None:
             w = 3.0
-        # subtract cell left+right margins (default 0.08in each side = 0.16in total)
-        max_w = max(0.5, w - 0.16)
-
-        # Read actual image dimensions to avoid upscaling
-        try:
-            with PilImage.open(str(img_path)) as im:
-                img_w_px, img_h_px = im.size
-                dpi = im.info.get('dpi', (96, 96))
-                dpi_x = dpi[0] if isinstance(dpi, (tuple, list)) else dpi
-                natural_w_in = img_w_px / dpi_x
-        except Exception:
-            natural_w_in = max_w  # fallback: assume full width
-
-        # Use the smaller of natural width and max cell width — never upscale, never overflow
-        final_w = min(natural_w_in, max_w)
+        # subtract cell left+right margins (default 0.08 in each side)
+        final_w = max(0.5, w - 0.16)
+        print(f"  inserting {img_path_obj.name} ({file_size} bytes) at {final_w:.2f}in (col {col_idx})")
 
         para = cell.paragraphs[0]
         para.clear()
@@ -333,10 +332,7 @@ def _insert_image_in_cell(cell, img_path, table=None, col_idx=0, width_in=None):
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     except Exception as e:
         print(f"⚠ _insert_image_in_cell error for {img_path}: {e}")
-        import traceback; traceback.print_exc()
-        para = cell.paragraphs[0]
-        para.clear()
-        para.add_run(f"[Photo: {Path(img_path).name}]")
+        traceback.print_exc()
 
 
 def _insert_image_after_para(doc, para_idx, img_path, caption, width_in=5.5):
@@ -561,6 +557,39 @@ def _convert_image_if_needed(img_path):
             return img_path
 
 
+def _normalize_to_jpeg(img_path: Path) -> Path:
+    """Re-save any image as JPEG via PIL, catching format-mismatch issues.
+
+    iPhone photos often arrive with .jpg extension but contain HEIC/WebP data;
+    PIL detects format by content, so this always produces a valid JPEG that
+    python-docx can embed without error.
+    """
+    import traceback
+    from PIL import Image as PilImage
+
+    # Register HEIC/HEIF opener if available (handles iPhone photos)
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except ImportError:
+        pass
+
+    jpg_path = img_path.with_suffix('.jpg')
+    try:
+        with PilImage.open(str(img_path)) as im:
+            fmt = im.format
+            print(f"  _normalize_to_jpeg: {img_path.name} detected as {fmt}, size={im.size}")
+            im.convert('RGB').save(str(jpg_path), 'JPEG', quality=90)
+        if img_path != jpg_path and img_path.exists():
+            img_path.unlink()
+        print(f"  _normalize_to_jpeg: saved → {jpg_path.name} ({jpg_path.stat().st_size} bytes)")
+        return jpg_path
+    except Exception as e:
+        print(f"⚠ _normalize_to_jpeg failed for {img_path.name}: {e}")
+        traceback.print_exc()
+        return img_path
+
+
 def _fill_photo_table_section(doc, sec_id, photos, width_in=None):
     """Append uploaded photos after the template examples for one section."""
     from docx.oxml.ns import qn
@@ -692,6 +721,7 @@ def _insert_photos_by_placeholder(doc, photo_paths_by_sec, photo_widths=None):
     for table in doc.tables:
         for row in table.rows:
             seen = set()
+            col_idx = 0
             for cell in row.cells:
                 if id(cell._tc) in seen:
                     continue
@@ -706,10 +736,11 @@ def _insert_photos_by_placeholder(doc, photo_paths_by_sec, photo_widths=None):
                         para.clear()
                     sec_photos = photo_paths_by_sec.get(sec_id, [])
                     if n < len(sec_photos):
-                        path = _convert_image_if_needed(Path(sec_photos[n]))
+                        path = Path(sec_photos[n])
                         if path.exists():
-                            width_in = photo_widths.get(sec_id, DEFAULT_PHOTO_WIDTHS.get(sec_id, 3.0))
-                            _insert_image_in_cell(cell, str(path), table=table, width_in=width_in)
+                            _insert_image_in_cell(cell, str(path), table=table,
+                                                  col_idx=col_idx, width_in=None)
+                    col_idx += 1
                     continue
 
                 m = pat_global.match(txt)
@@ -719,10 +750,14 @@ def _insert_photos_by_placeholder(doc, photo_paths_by_sec, photo_widths=None):
                         para.clear()
                     if n < len(flat_photos):
                         path, sec_id = flat_photos[n]
-                        path = _convert_image_if_needed(Path(path))
+                        path = Path(path)
                         if path.exists():
-                            width_in = photo_widths.get(sec_id, DEFAULT_PHOTO_WIDTHS.get(sec_id, 3.0))
-                            _insert_image_in_cell(cell, str(path), table=table, width_in=width_in)
+                            _insert_image_in_cell(cell, str(path), table=table,
+                                                  col_idx=col_idx, width_in=None)
+                    col_idx += 1
+                    continue
+
+                col_idx += 1
 
 
 # ── Fill U-value compliance table (Table 22) ──────────────────────────────
@@ -1204,12 +1239,19 @@ def _materialize_photo_inputs(photo_inputs, photos_dir):
     photo_paths_by_sec = {}
     stored_photos = {}
 
+    print(f"_materialize_photo_inputs: {len(photo_inputs)} photo(s)")
     for (sec_id, n), file_obj in sorted(photo_inputs.items()):
         filename = getattr(file_obj, 'filename', '') or f"s{sec_id}_{n:02d}.jpg"
         ext = Path(filename).suffix or '.jpg'
         dst = photos_dir / f"s{sec_id}_{n:02d}{ext}"
         _write_input_file(file_obj, dst)
+        raw_size = dst.stat().st_size if dst.exists() else 0
+        print(f"  sec={sec_id} slot={n}: wrote {dst.name} ({raw_size} bytes)")
         dst = _convert_image_if_needed(dst)
+        dst = _normalize_to_jpeg(dst)
+        if not dst.exists() or dst.stat().st_size == 0:
+            print(f"  ⚠ skipping sec={sec_id} slot={n}: file missing or empty after normalize")
+            continue
         content = dst.read_bytes()
         stored_photos[(sec_id, n)] = BinaryUpload(
             filename=dst.name,
@@ -1217,7 +1259,9 @@ def _materialize_photo_inputs(photo_inputs, photos_dir):
             mimetype=guess_mimetype(dst.name),
         )
         photo_paths_by_sec.setdefault(sec_id, []).append(dst)
+        print(f"  ✓ sec={sec_id} slot={n}: ready as {dst.name} ({len(content)} bytes)")
 
+    print(f"_materialize_photo_inputs: sections with photos: {sorted(photo_paths_by_sec.keys())}")
     return photo_paths_by_sec, stored_photos
 
 

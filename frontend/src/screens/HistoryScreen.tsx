@@ -1,26 +1,126 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, RefreshControl, Linking, Alert, Modal } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
+  ActivityIndicator, RefreshControl, Linking, Alert, Modal, Animated, Easing,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { draftStorage, AuditDraft } from '../utils/draftStorage';
+import { Colors, Radius, Shadow, Space } from '../theme';
 
 const BASE_URL = 'http://157.180.28.98:5050';
 
+// Backend stores energy as gas_2023: [v0,v1,...] arrays; reconstruct y2023 from them.
+// Fallback: try flat gas_2023_0 / gas_2023_1 keys for older records.
 function reconstructEnergyArrays(raw: any): any {
   const result = { ...raw };
   [2023, 2024, 2025].forEach(yr => {
-    result[`y${yr}`] = Array.from({ length: 12 }, (_, mi) => ({
-      gas: raw[`gas_${yr}_${mi}`] || '',
-      elec: raw[`elec_${yr}_${mi}`] || '',
-      other: raw[`other_${yr}_${mi}`] || '',
-    }));
+    const gasArr  = raw[`gas_${yr}`];
+    const elecArr = raw[`elec_${yr}`];
+    const otherArr = raw[`other_${yr}`];
+    if (Array.isArray(gasArr)) {
+      result[`y${yr}`] = Array.from({ length: 12 }, (_, mi) => ({
+        gas:   String(gasArr[mi]   ?? ''),
+        elec:  String(elecArr?.[mi]  ?? ''),
+        other: String(otherArr?.[mi] ?? ''),
+      }));
+    } else {
+      result[`y${yr}`] = Array.from({ length: 12 }, (_, mi) => ({
+        gas:   raw[`gas_${yr}_${mi}`]   || '',
+        elec:  raw[`elec_${yr}_${mi}`]  || '',
+        other: raw[`other_${yr}_${mi}`] || '',
+      }));
+    }
   });
   return result;
 }
 
-export default function HistoryScreen({ navigation, user = null }: { navigation?: any, user?: any }) {
+// Rebuild list arrays that step components initialise from (e.g. data.floors_list).
+function reconstructStructuredArrays(raw: any): any {
+  const r = { ...raw };
+
+  if (!r.floors_list) {
+    const list = [];
+    for (let i = 1; i <= 5; i++) {
+      if (raw[`floor_l${i}`] != null || raw[`floor_w${i}`] != null)
+        list.push({ l: String(raw[`floor_l${i}`] ?? ''), w: String(raw[`floor_w${i}`] ?? '') });
+    }
+    if (list.length) r.floors_list = list;
+  }
+
+  if (!r.doors_list) {
+    const list = [];
+    for (let i = 1; i <= 5; i++) {
+      if (raw[`door_w${i}`] != null || raw[`door_h${i}`] != null)
+        list.push({ w: String(raw[`door_w${i}`] ?? ''), h: String(raw[`door_h${i}`] ?? ''), n: String(raw[`door_n${i}`] ?? '1') });
+    }
+    if (list.length) r.doors_list = list;
+  }
+
+  if (!r.windows_list) {
+    const list = [];
+    for (let i = 1; i <= 5; i++) {
+      if (raw[`win_w${i}`] != null || raw[`win_h${i}`] != null)
+        list.push({ w: String(raw[`win_w${i}`] ?? ''), h: String(raw[`win_h${i}`] ?? ''), n: String(raw[`win_n${i}`] ?? '1') });
+    }
+    if (list.length) r.windows_list = list;
+  }
+
+  if (!r.walls_list) {
+    const list = [];
+    for (let i = 1; i <= 5; i++) {
+      if (raw[`wall_p${i}`] != null || raw[`wall_h${i}`] != null)
+        list.push({ p: String(raw[`wall_p${i}`] ?? ''), h: String(raw[`wall_h${i}`] ?? '') });
+    }
+    if (list.length) r.walls_list = list;
+  }
+
+  if (!r.appliances_list) {
+    const list = [];
+    for (let i = 1; i <= 10; i++) {
+      if (raw[`apl${i}_name`])
+        list.push({ name: String(raw[`apl${i}_name`] ?? ''), w: String(raw[`apl${i}_w`] ?? ''), n: String(raw[`apl${i}_n`] ?? '1'), hrs: String(raw[`apl${i}_hrs`] ?? '') });
+    }
+    if (list.length) r.appliances_list = list;
+  }
+
+  return r;
+}
+
+const SEC_ID_TO_SECTION: Record<number, string> = {
+  1: 'exterior', 2: 'windows', 3: 'floorplan',
+  4: 'heating',  5: 'cooling', 6: 'appliances',
+  7: 'bills',    8: 'temphum', 9: 'lux', 10: 'thermal',
+};
+
+function reconstructPhotoItems(
+  photos: { sec_id: number; slot_no: number; filename: string }[],
+  caseName: string,
+): Record<string, any[]> {
+  const items: Record<string, any[]> = {};
+  for (const p of photos) {
+    const sectionId = SEC_ID_TO_SECTION[p.sec_id];
+    if (!sectionId) continue;
+    if (!items[sectionId]) items[sectionId] = [];
+    items[sectionId].push({
+      id: `existing_${p.sec_id}_${p.slot_no}`,
+      uri: `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${p.sec_id}/${p.slot_no}`,
+      fileName: p.filename,
+      serverKey: undefined,   // no temp key; backend reuses existing photos on edit
+      isExisting: true,       // prevents re-upload on Photos component mount
+      progress: 100,
+      uploading: false,
+      totalBytes: 0,
+      loadedBytes: 0,
+    });
+  }
+  return items;
+}
+
+export default function HistoryScreen({ navigation, user = null }: { navigation?: any; user?: any }) {
+  const insets = useSafeAreaInsets();
   const [cases, setCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -33,14 +133,30 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
   const [myOnly, setMyOnly] = useState(false);
   const [localDraft, setLocalDraft] = useState<AuditDraft | null>(null);
 
+  const spinAnim = useRef(new Animated.Value(0)).current;
+  const spinLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+
   useEffect(() => {
-    const loadUser = async () => {
-      if (!user) {
-        const userStr = await AsyncStorage.getItem('auth_user');
-        if (userStr) setCurrentUser(JSON.parse(userStr));
-      }
-    };
-    loadUser();
+    if (refreshing) {
+      spinAnim.setValue(0);
+      spinLoopRef.current = Animated.loop(
+        Animated.timing(spinAnim, { toValue: 1, duration: 700, easing: Easing.linear, useNativeDriver: true })
+      );
+      spinLoopRef.current.start();
+    } else {
+      spinLoopRef.current?.stop();
+      spinAnim.setValue(0);
+    }
+  }, [refreshing]);
+
+  const spinDeg = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  useEffect(() => {
+    if (!user) {
+      AsyncStorage.getItem('auth_user').then(s => {
+        if (s) setCurrentUser(JSON.parse(s));
+      });
+    }
   }, []);
 
   const loadCases = useCallback(async () => {
@@ -48,7 +164,7 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
       setError('');
       const token = await AsyncStorage.getItem('auth_token');
       const res = await fetch(`${BASE_URL}/cases`, {
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       const sorted = [...(Array.isArray(data) ? data : [])].sort((a, b) => {
@@ -78,21 +194,27 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
     if (!navigation) return;
     setEditLoading(caseName);
     try {
-      const res = await fetch(`${BASE_URL}/cases/${caseName}/form`);
+      const res = await fetch(`${BASE_URL}/cases/${encodeURIComponent(caseName)}/form`);
       const raw = await res.json();
       if (raw.error) { Alert.alert('Error', raw.error); return; }
-      const editData = reconstructEnergyArrays(raw);
+
+      const photoList: { sec_id: number; slot_no: number; filename: string }[] = raw._photos || [];
+      delete raw._photos;
+
+      let editData = reconstructEnergyArrays(raw);
+      editData = reconstructStructuredArrays(editData);
       editData.edit_case = caseName;
+
+      if (photoList.length) {
+        editData.photoItems = reconstructPhotoItems(photoList, caseName);
+      }
+
       navigation.navigate('Editor', { editData, editCaseName: caseName });
     } catch (err: any) {
       Alert.alert('Error', `Error loading case: ${err.message}`);
     } finally {
       setEditLoading(null);
     }
-  };
-
-  const handleDelete = (caseName: string) => {
-    setPendingDelete(caseName);
   };
 
   const confirmDelete = async () => {
@@ -102,20 +224,13 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
     setDeleteLoading(caseName);
     try {
       const token = await AsyncStorage.getItem('auth_token');
-      if (!token) {
-        Alert.alert('Error', 'Not logged in. Please restart the app and login again.');
-        return;
-      }
+      if (!token) { Alert.alert('Error', 'Not logged in.'); return; }
       const res = await fetch(`${BASE_URL}/cases/${encodeURIComponent(caseName)}/delete`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       let data: any = {};
-      try {
-        data = await res.json();
-      } catch {
-        data = { success: false, error: `Server error (HTTP ${res.status})` };
-      }
+      try { data = await res.json(); } catch { data = { success: false, error: `HTTP ${res.status}` }; }
       if (data.success) {
         await loadCases();
       } else {
@@ -128,10 +243,6 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
     }
   };
 
-  const downloadFile = (caseName: string, filename: string) => {
-    Linking.openURL(`${BASE_URL}/cases/${caseName}/${filename}`);
-  };
-
   const canManage = (audit: any) => {
     if (!currentUser) return false;
     if (currentUser.role === 'admin') return true;
@@ -139,171 +250,216 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
   };
 
   const filteredCases = cases.filter(c => {
-    const matchesSearch = c.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.owner?.toLowerCase().includes(searchQuery.toLowerCase());
-    if (myOnly && currentUser) {
-      return matchesSearch && c.created_by === currentUser.id;
-    }
-    return matchesSearch;
+    const q = searchQuery.toLowerCase();
+    const matchSearch = !q || c.name?.toLowerCase().includes(q) || c.owner?.toLowerCase().includes(q);
+    if (myOnly && currentUser) return matchSearch && c.created_by === currentUser.id;
+    return matchSearch;
   });
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#2563eb', '#1d4ed8']} style={styles.header}>
-        <Text style={styles.headerTitle}>Folders</Text>
-        <Text style={styles.headerSubtitle}>{filteredCases.length} cases</Text>
-      </LinearGradient>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.headerTitle}>Cases</Text>
+            <Text style={styles.headerSub}>{filteredCases.length} {filteredCases.length === 1 ? 'audit' : 'audits'}</Text>
+          </View>
+          <TouchableOpacity style={styles.refreshBtn} onPress={onRefresh} disabled={refreshing}>
+            <Animated.View style={{ transform: [{ rotate: spinDeg }] }}>
+              <Ionicons name="refresh-outline" size={20} color={refreshing ? Colors.primary : Colors.textMuted} />
+            </Animated.View>
+          </TouchableOpacity>
+        </View>
 
-      <View style={styles.content}>
-        {/* Toggle */}
-        <View style={styles.toggleRow}>
+        {/* Search */}
+        <View style={styles.searchWrap}>
+          <Ionicons name="search-outline" size={18} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search by name or owner…"
+            placeholderTextColor={Colors.textMuted}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Toggle: All / Mine */}
+        <View style={styles.toggleWrap}>
           <TouchableOpacity
             style={[styles.toggleBtn, !myOnly && styles.toggleBtnActive]}
             onPress={() => setMyOnly(false)}
           >
-            <Text style={[styles.toggleText, !myOnly && styles.toggleTextActive]}>All Audits</Text>
+            <Text style={[styles.toggleLabel, !myOnly && styles.toggleLabelActive]}>All Audits</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.toggleBtn, myOnly && styles.toggleBtnActive]}
             onPress={() => setMyOnly(true)}
           >
-            <Text style={[styles.toggleText, myOnly && styles.toggleTextActive]}>My Cases</Text>
+            <Text style={[styles.toggleLabel, myOnly && styles.toggleLabelActive]}>My Cases</Text>
           </TouchableOpacity>
         </View>
+      </View>
 
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={20} color="#9ca3af" />
-          <TextInput style={styles.searchInput} value={searchQuery} onChangeText={setSearchQuery} placeholder="Search..." placeholderTextColor="#9ca3af" />
-          <TouchableOpacity onPress={onRefresh}>
-            <Ionicons name="refresh" size={20} color="#2563eb" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Draft in progress banner */}
+      {/* Body */}
+      <View style={styles.body}>
+        {/* Draft banner */}
         {localDraft && navigation && (
           <View style={styles.draftBanner}>
-            <View style={styles.draftBannerLeft}>
-              <Ionicons name="document-text" size={22} color="#f97316" />
-              <View>
-                <Text style={styles.draftBannerTitle}>Draft in progress</Text>
-                <Text style={styles.draftBannerSub}>
-                  Last saved {draftStorage.formatAge(localDraft.savedAt)} · Step {localDraft.step}
-                </Text>
-              </View>
+            <Ionicons name="document-text-outline" size={18} color={Colors.orange} />
+            <View style={styles.draftBannerText}>
+              <Text style={styles.draftBannerTitle}>Draft in progress</Text>
+              <Text style={styles.draftBannerSub}>
+                Step {localDraft.step}/10 · {draftStorage.formatAge(localDraft.savedAt)}
+              </Text>
             </View>
-            <View style={styles.draftBannerActions}>
-              <TouchableOpacity
-                style={styles.draftResumeBtn}
-                onPress={() => navigation.navigate('Editor', { startFresh: undefined })}
-              >
-                <Text style={styles.draftResumeBtnText}>Resume</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  draftStorage.clear();
-                  setLocalDraft(null);
-                }}
-              >
-                <Ionicons name="close-circle" size={22} color="#9ca3af" />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.draftResumeBtn}
+              onPress={() => navigation.navigate('Editor')}
+            >
+              <Text style={styles.draftResumeBtnText}>Resume</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { draftStorage.clear(); setLocalDraft(null); }}>
+              <Ionicons name="close" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
           </View>
         )}
 
-        {error ? (
-          <View style={styles.errorBox}>
-            <Ionicons name="warning" size={20} color="#ef4444" />
-            <Text style={styles.errorText}>{error}</Text>
+        {/* Error */}
+        {!!error && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="wifi-outline" size={18} color={Colors.danger} />
+            <Text style={styles.errorText} numberOfLines={2}>{error}</Text>
+            <TouchableOpacity onPress={loadCases}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
           </View>
-        ) : null}
+        )}
 
         {loading ? (
           <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" color="#2563eb" />
-            <Text style={styles.loadingText}>Loading cases...</Text>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>Loading cases…</Text>
           </View>
         ) : (
-          <ScrollView style={styles.list} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-            {filteredCases.map((audit) => (
+          <ScrollView
+            style={styles.list}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.listContent}
+          >
+            {filteredCases.map(audit => (
               <View key={audit.name} style={styles.auditCard}>
-                <View style={styles.auditHeader}>
-                  <View style={styles.auditIcon}>
-                    <Ionicons name="business" size={22} color="#fff" />
+                {/* Card header */}
+                <View style={styles.auditCardHeader}>
+                  <View style={styles.auditIconWrap}>
+                    <Ionicons name="business-outline" size={20} color={Colors.primary} />
                   </View>
-                  <View style={styles.auditInfo}>
-                    <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{audit.name}</Text>
-                    </View>
-                    <Text style={styles.auditOwner}>{audit.owner || '—'}</Text>
-                    <Text style={styles.auditDate}>{audit.updated_at}</Text>
+                  <View style={styles.auditMeta}>
+                    <Text style={styles.auditName} numberOfLines={1}>{audit.name}</Text>
+                    <Text style={styles.auditOwner} numberOfLines={1}>{audit.owner || '—'}</Text>
                   </View>
+                  <Text style={styles.auditDate}>{audit.updated_at?.split(' ')[0] || audit.updated_at || ''}</Text>
                 </View>
 
+                {/* Files */}
                 {audit.files?.length > 0 && (
                   <View style={styles.filesRow}>
                     {audit.files.map((file: string) => (
-                      <TouchableOpacity key={file} style={styles.fileChip} onPress={() => downloadFile(audit.name, file)}>
-                        <Ionicons name={file.endsWith('.xlsx') ? 'grid' : 'document-text'} size={12} color="#2563eb" />
+                      <TouchableOpacity
+                        key={file}
+                        style={styles.fileChip}
+                        onPress={() => Linking.openURL(`${BASE_URL}/cases/${audit.name}/${file}`)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={file.endsWith('.xlsx') ? 'grid-outline' : 'document-text-outline'}
+                          size={12}
+                          color={Colors.primary}
+                        />
                         <Text style={styles.fileChipText}>{file.split('.').pop()?.toUpperCase()}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 )}
 
+                {/* Actions */}
                 {canManage(audit) && (
-                  <View style={styles.actionButtons}>
+                  <View style={styles.actionRow}>
                     <TouchableOpacity
-                      style={[styles.actionButtonEdit, editLoading === audit.name && styles.actionButtonDisabled]}
+                      style={[styles.actionBtn, styles.editBtn, editLoading === audit.name && styles.actionBtnDisabled]}
                       onPress={() => handleEdit(audit.name)}
-                      disabled={editLoading === audit.name}
+                      disabled={!!editLoading || !!deleteLoading}
+                      activeOpacity={0.7}
                     >
-                      {editLoading === audit.name
-                        ? <ActivityIndicator size="small" color="#2563eb" style={{ width: 16, height: 16 }} />
-                        : <Ionicons name="pencil" size={16} color="#2563eb" />
-                      }
-                      <Text style={styles.actionButtonTextEdit}>Edit</Text>
+                      {editLoading === audit.name ? (
+                        <ActivityIndicator size="small" color={Colors.primary} style={{ width: 16, height: 16 }} />
+                      ) : (
+                        <Ionicons name="pencil-outline" size={15} color={Colors.primary} />
+                      )}
+                      <Text style={styles.editBtnText}>Edit</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={[styles.actionButtonDanger, deleteLoading === audit.name && styles.actionButtonDisabled]}
-                      onPress={() => handleDelete(audit.name)}
-                      disabled={deleteLoading === audit.name}
+                      style={[styles.actionBtn, styles.deleteBtn, deleteLoading === audit.name && styles.actionBtnDisabled]}
+                      onPress={() => setPendingDelete(audit.name)}
+                      disabled={!!editLoading || !!deleteLoading}
+                      activeOpacity={0.7}
                     >
-                      {deleteLoading === audit.name
-                        ? <ActivityIndicator size="small" color="#ef4444" style={{ width: 16, height: 16 }} />
-                        : <Ionicons name="trash" size={16} color="#ef4444" />
-                      }
-                      <Text style={styles.actionButtonTextDanger}>Delete</Text>
+                      {deleteLoading === audit.name ? (
+                        <ActivityIndicator size="small" color={Colors.danger} style={{ width: 16, height: 16 }} />
+                      ) : (
+                        <Ionicons name="trash-outline" size={15} color={Colors.danger} />
+                      )}
+                      <Text style={styles.deleteBtnText}>Delete</Text>
                     </TouchableOpacity>
                   </View>
                 )}
               </View>
             ))}
+
             {filteredCases.length === 0 && !loading && (
               <View style={styles.emptyState}>
-                <Ionicons name="folder-open" size={48} color="#d1d5db" />
-                <Text style={styles.emptyText}>{myOnly ? 'You have no cases yet' : 'No audits found'}</Text>
+                <View style={styles.emptyIconWrap}>
+                  <Ionicons name="folder-open-outline" size={40} color={Colors.border} />
+                </View>
+                <Text style={styles.emptyTitle}>
+                  {searchQuery ? 'No results found' : myOnly ? 'No cases yet' : 'No audits found'}
+                </Text>
+                <Text style={styles.emptyText}>
+                  {searchQuery ? 'Try a different search term' : 'Start a new energy audit'}
+                </Text>
               </View>
             )}
           </ScrollView>
         )}
       </View>
 
+      {/* Delete Confirm Modal */}
       <Modal visible={Boolean(pendingDelete)} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Ionicons name="trash" size={32} color="#ef4444" />
-            <Text style={styles.modalTitle}>Delete Audit</Text>
-            <Text style={styles.modalMessage}>
-              Are you sure you want to delete{'\n'}
-              <Text style={styles.modalCaseName}>"{pendingDelete}"</Text>?{'\n'}
-              This cannot be undone.
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="trash-outline" size={28} color={Colors.danger} />
+            </View>
+            <Text style={styles.modalTitle}>Delete Audit?</Text>
+            <Text style={styles.modalMsg}>
+              This will permanently remove{'\n'}
+              <Text style={styles.modalCaseName}>"{pendingDelete}"</Text>
+              {'\n'}and cannot be undone.
             </Text>
-            <View style={styles.modalButtons}>
+            <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setPendingDelete(null)}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalDeleteBtn} onPress={confirmDelete}>
+                <Ionicons name="trash-outline" size={16} color={Colors.white} />
                 <Text style={styles.modalDeleteText}>Delete</Text>
               </TouchableOpacity>
             </View>
@@ -315,57 +471,219 @@ export default function HistoryScreen({ navigation, user = null }: { navigation?
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
-  header: { paddingTop: 60, paddingBottom: 24, paddingHorizontal: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff' },
-  headerSubtitle: { fontSize: 14, color: '#bfdbfe', marginTop: 4 },
-  content: { flex: 1, padding: 16 },
-  toggleRow: { flexDirection: 'row', backgroundColor: '#e5e7eb', borderRadius: 12, padding: 4, marginBottom: 16 },
-  toggleBtn: { flex: 1, paddingVertical: 8, borderRadius: 9, alignItems: 'center' },
-  toggleBtnActive: { backgroundColor: '#fff', elevation: 2 },
-  toggleText: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
-  toggleTextActive: { color: '#2563eb' },
-  draftBanner: { backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#fed7aa', borderRadius: 14, padding: 14, marginBottom: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  draftBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  draftBannerTitle: { fontSize: 13, fontWeight: '700', color: '#c2410c' },
-  draftBannerSub: { fontSize: 11, color: '#9a3412', marginTop: 2 },
-  draftBannerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  draftResumeBtn: { backgroundColor: '#f97316', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
-  draftResumeBtnText: { fontSize: 12, fontWeight: '700', color: '#fff' },
-  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 16, elevation: 2, gap: 8 },
-  searchInput: { flex: 1, fontSize: 14, color: '#111827' },
-  errorBox: { flexDirection: 'row', gap: 8, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', borderRadius: 12, padding: 14, marginBottom: 16 },
-  errorText: { flex: 1, fontSize: 13, color: '#ef4444' },
-  loadingBox: { alignItems: 'center', paddingVertical: 48, gap: 12 },
-  loadingText: { fontSize: 14, color: '#6b7280' },
+  container: { flex: 1, backgroundColor: Colors.bg },
+
+  header: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: Space.lg,
+    paddingBottom: Space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: Space.md,
+    ...Shadow.sm,
+  },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: Colors.text },
+  headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  refreshBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.md,
+    paddingHorizontal: Space.md,
+    paddingVertical: 10,
+    gap: Space.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.text, paddingVertical: 0 },
+
+  toggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface2,
+    borderRadius: Radius.md,
+    padding: 3,
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+  },
+  toggleBtnActive: { backgroundColor: Colors.surface, ...Shadow.sm },
+  toggleLabel: { fontSize: 13, fontWeight: '600', color: Colors.textMuted },
+  toggleLabelActive: { color: Colors.primary },
+
+  body: { flex: 1, paddingHorizontal: Space.lg, paddingTop: Space.md },
+
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: Space.md,
+    marginBottom: Space.md,
+    borderWidth: 1,
+    borderColor: '#FDDCAB',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.orange,
+  },
+  draftBannerText: { flex: 1 },
+  draftBannerTitle: { fontSize: 13, fontWeight: '700', color: Colors.text },
+  draftBannerSub: { fontSize: 11, color: Colors.textSec, marginTop: 1 },
+  draftResumeBtn: {
+    backgroundColor: Colors.orange,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: Radius.xs,
+  },
+  draftResumeBtnText: { fontSize: 12, fontWeight: '700', color: Colors.white },
+
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm,
+    backgroundColor: Colors.dangerLight,
+    borderRadius: Radius.md,
+    padding: Space.md,
+    marginBottom: Space.md,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  errorText: { flex: 1, fontSize: 13, color: Colors.danger },
+  retryText: { fontSize: 13, color: Colors.danger, fontWeight: '700' },
+
+  loadingBox: { alignItems: 'center', paddingVertical: 64, gap: Space.md },
+  loadingText: { fontSize: 14, color: Colors.textSec },
+
   list: { flex: 1 },
-  auditCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
-  auditHeader: { flexDirection: 'row', marginBottom: 12 },
-  auditIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#2563eb', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  auditInfo: { flex: 1 },
-  badge: { backgroundColor: '#dbeafe', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginBottom: 4, alignSelf: 'flex-start' },
-  badgeText: { fontSize: 11, color: '#1d4ed8', fontWeight: '600' },
-  auditOwner: { fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 2 },
-  auditDate: { fontSize: 11, color: '#6b7280' },
-  filesRow: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-  fileChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
-  fileChipText: { fontSize: 11, color: '#2563eb', fontWeight: '600' },
-  actionButtons: { flexDirection: 'row', gap: 8 },
-  actionButtonEdit: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#eff6ff', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
-  actionButtonTextEdit: { fontSize: 12, color: '#2563eb', fontWeight: '600' },
-  actionButtonDanger: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#fef2f2', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8 },
-  actionButtonTextDanger: { fontSize: 12, color: '#ef4444', fontWeight: '600' },
-  actionButtonDisabled: { opacity: 0.6 },
-  emptyState: { paddingVertical: 48, alignItems: 'center', gap: 12 },
-  emptyText: { fontSize: 14, color: '#6b7280' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 32 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 20, padding: 28, alignItems: 'center', gap: 12, width: '100%' },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  modalMessage: { fontSize: 14, color: '#4b5563', textAlign: 'center', lineHeight: 22 },
-  modalCaseName: { fontWeight: '700', color: '#111827' },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 4, width: '100%' },
-  modalCancelBtn: { flex: 1, backgroundColor: '#f3f4f6', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  modalCancelText: { fontSize: 15, fontWeight: '600', color: '#374151' },
-  modalDeleteBtn: { flex: 1, backgroundColor: '#ef4444', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  modalDeleteText: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  listContent: { gap: Space.md, paddingBottom: Space.xxxl },
+
+  auditCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: Space.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadow.sm,
+  },
+  auditCardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Space.md, gap: Space.md },
+  auditIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  auditMeta: { flex: 1 },
+  auditName: { fontSize: 14, fontWeight: '700', color: Colors.text },
+  auditOwner: { fontSize: 13, color: Colors.textSec, marginTop: 2 },
+  auditDate: { fontSize: 11, color: Colors.textMuted, flexShrink: 0 },
+
+  filesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Space.sm, marginBottom: Space.md },
+  fileChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.xs,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  fileChipText: { fontSize: 11, color: Colors.primary, fontWeight: '700' },
+
+  actionRow: { flexDirection: 'row', gap: Space.sm },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: Radius.sm,
+    borderWidth: 1,
+  },
+  actionBtnDisabled: { opacity: 0.5 },
+  editBtn: { backgroundColor: Colors.primaryLight, borderColor: Colors.border },
+  editBtnText: { fontSize: 13, color: Colors.primary, fontWeight: '600' },
+  deleteBtn: { backgroundColor: Colors.dangerLight, borderColor: '#FECACA' },
+  deleteBtnText: { fontSize: 13, color: Colors.danger, fontWeight: '600' },
+
+  emptyState: { alignItems: 'center', paddingVertical: 64, gap: Space.sm },
+  emptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: Radius.xl,
+    backgroundColor: Colors.surface2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Space.sm,
+  },
+  emptyTitle: { fontSize: 16, fontWeight: '600', color: Colors.textSec },
+  emptyText: { fontSize: 13, color: Colors.textMuted },
+
+  // Delete Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: Colors.overlay,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Space.xxxl,
+  },
+  modalCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.xl,
+    padding: Space.xxxl,
+    alignItems: 'center',
+    gap: Space.md,
+    width: '100%',
+    ...Shadow.lg,
+  },
+  modalIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: Colors.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
+  modalMsg: { fontSize: 14, color: Colors.textSec, textAlign: 'center', lineHeight: 22 },
+  modalCaseName: { fontWeight: '700', color: Colors.text },
+  modalBtns: { flexDirection: 'row', gap: Space.md, width: '100%', marginTop: Space.sm },
+  modalCancelBtn: {
+    flex: 1,
+    backgroundColor: Colors.surface2,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalCancelText: { fontSize: 15, fontWeight: '600', color: Colors.textSec },
+  modalDeleteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.danger,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+  },
+  modalDeleteText: { fontSize: 15, fontWeight: '600', color: Colors.white },
 });
