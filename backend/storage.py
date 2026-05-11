@@ -161,14 +161,31 @@ class PostgresStorage:
     def peek_next_case_number(self) -> str:
         self.ensure_schema()
         year = datetime.now().strftime("%y")
+        prefix = year
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT last_value FROM app_counters WHERE name = 'case_number'"
                 )
                 row = cur.fetchone()
-        next_val = (int(row['last_value']) + 1) if row else 1
+                counter_val = int(row['last_value']) if row else 0
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(CAST(SUBSTRING(case_no FROM 3) AS BIGINT)), 0) AS max_seq
+                    FROM cases WHERE case_no ~ %s
+                    """,
+                    (f"^{prefix}\\d{{5}}$",),
+                )
+                max_seq = cur.fetchone()["max_seq"]
+        next_val = max(counter_val + 1, max_seq + 1)
         return f"{year}{next_val:05d}"
+
+    def case_no_exists(self, case_no: str) -> bool:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM cases WHERE case_no = %s", (case_no,))
+                return cur.fetchone() is not None
 
     def get_case(self, case_name: str):
         self.ensure_schema()

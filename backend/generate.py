@@ -1303,7 +1303,10 @@ def generate_all(form_data, uploaded_photos, edit_case_name=None, created_by=Non
         photo_inputs = storage.get_case_photos(edit_case_name)
     else:
         user_case_no = (form_data.get('case_number') or '').strip()
-        case_no = user_case_no if user_case_no else storage.next_case_number()
+        if user_case_no and not storage.case_no_exists(user_case_no):
+            case_no = user_case_no
+        else:
+            case_no = storage.next_case_number()
         case_name = f"EA-{case_no}_{owner_surname}"
         photo_inputs = {}
 
