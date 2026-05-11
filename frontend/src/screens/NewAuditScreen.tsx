@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, Alert, Modal, ActivityIndicator, AppState } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, SafeAreaView, Alert, Modal, ActivityIndicator, AppState, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,22 +37,17 @@ const steps = [
   { id: 10, name: 'Review',       component: Review },
 ];
 
-const STEP_META: Record<number, {
-  gradient: [string, string];
-  icon: string;
-  subtitle: string;
-  bg: string;
-}> = {
-  1:  { gradient: ['#1A56DB', '#1E429F'], icon: 'person',          subtitle: 'Project & contact details',      bg: 'rgba(26,86,219,0.04)'   },
-  2:  { gradient: ['#0694A2', '#036672'], icon: 'home',             subtitle: 'Structure & materials',          bg: 'rgba(6,148,162,0.04)'   },
-  3:  { gradient: ['#7E3AF2', '#6C2BD9'], icon: 'cog',              subtitle: 'Heating, cooling & ventilation', bg: 'rgba(126,58,242,0.04)'  },
-  4:  { gradient: ['#E11D48', '#BE123C'], icon: 'flash',            subtitle: 'Power-consuming devices',        bg: 'rgba(225,29,72,0.04)'   },
-  5:  { gradient: ['#0891B2', '#0E7490'], icon: 'cube',             subtitle: 'Floor plan & openings',          bg: 'rgba(8,145,178,0.04)'   },
-  6:  { gradient: ['#EA580C', '#C2410C'], icon: 'bar-chart',        subtitle: 'Gas, electricity & other fuels', bg: 'rgba(234,88,12,0.04)'   },
-  7:  { gradient: ['#D97706', '#B45309'], icon: 'sunny',            subtitle: 'Boiler units & photovoltaic',    bg: 'rgba(217,119,6,0.04)'   },
-  8:  { gradient: ['#4338CA', '#3730A3'], icon: 'thermometer',      subtitle: 'Temperature, humidity & light',  bg: 'rgba(67,56,202,0.04)'   },
-  9:  { gradient: ['#374151', '#1F2937'], icon: 'camera',           subtitle: 'Site documentation',             bg: 'rgba(55,65,81,0.04)'    },
-  10: { gradient: ['#059669', '#047857'], icon: 'clipboard',        subtitle: 'Verify & submit',                bg: 'rgba(5,150,105,0.04)'   },
+const STEP_META: Record<number, { photoId: string; subtitle: string; bg: string }> = {
+  1:  { photoId: 'Tm3euR9N7Z4', subtitle: 'Project & contact details',      bg: 'rgba(26,86,219,0.04)'   },
+  2:  { photoId: 'fxTYHz1RG10', subtitle: 'Structure & materials',          bg: 'rgba(6,148,162,0.04)'   },
+  3:  { photoId: 'Z6GxeYUzG_s', subtitle: 'Heating, cooling & ventilation', bg: 'rgba(126,58,242,0.04)'  },
+  4:  { photoId: 'j6QSUeiW6vo', subtitle: 'Power-consuming devices',        bg: 'rgba(225,29,72,0.04)'   },
+  5:  { photoId: 'c-FCf51PzaQ', subtitle: 'Floor plan & openings',          bg: 'rgba(8,145,178,0.04)'   },
+  6:  { photoId: 'eBTXgMCEc9o', subtitle: 'Gas, electricity & other fuels', bg: 'rgba(234,88,12,0.04)'   },
+  7:  { photoId: 'XGAZzyLzn18', subtitle: 'Boiler units & photovoltaic',    bg: 'rgba(217,119,6,0.04)'   },
+  8:  { photoId: 'A2s88COmrPI', subtitle: 'Temperature, humidity & light',  bg: 'rgba(67,56,202,0.04)'   },
+  9:  { photoId: 'qOyo8O9dH-w', subtitle: 'Site documentation',             bg: 'rgba(55,65,81,0.04)'    },
+  10: { photoId: 'QI6NLgN5XnM', subtitle: 'Verify & submit',                bg: 'rgba(5,150,105,0.04)'   },
 };
 
 function buildDefaults(caseNumber?: string): Record<string, any> {
@@ -715,37 +710,38 @@ export default function NewAuditScreen({ navigation, route }: any) {
           const meta = STEP_META[step.id];
           return (
             <View key={step.id}>
-              {/* Step banner — replaces simple divider line */}
-              <LinearGradient
-                colors={meta.gradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
+              {/* Step banner — real photo, narrow height, full width */}
+              <View
                 style={styles.stepBanner}
                 onLayout={e => { sectionOffsets.current[step.id] = e.nativeEvent.layout.y; }}
               >
-                {/* Decorative background circles */}
-                <View style={[styles.bannerDecorCircle, styles.bannerDecorCircle1]} />
-                <View style={[styles.bannerDecorCircle, styles.bannerDecorCircle2]} />
-
-                {/* Step number badge */}
-                <View style={styles.bannerNumBadge}>
-                  <Text style={styles.bannerNumText}>{step.id}</Text>
-                </View>
-
-                {/* Title + subtitle */}
-                <View style={styles.bannerTextGroup}>
-                  <Text style={styles.bannerTitle}>{step.name}</Text>
-                  <Text style={styles.bannerSub}>{meta.subtitle}</Text>
-                </View>
-
-                {/* Large ghost icon — purely decorative */}
-                <Ionicons
-                  name={`${meta.icon}-outline` as any}
-                  size={74}
-                  color="rgba(255,255,255,0.12)"
-                  style={styles.bannerBgIcon}
+                {/* Photo fill */}
+                <Image
+                  source={{ uri: `https://images.unsplash.com/photo-${meta.photoId}?w=800&h=180&fit=crop&auto=format&q=80` }}
+                  style={styles.bannerImage}
+                  resizeMode="cover"
                 />
-              </LinearGradient>
+
+                {/* Dark scrim so white text is readable */}
+                <View style={styles.bannerScrim} />
+
+                {/* Bottom fade into page background */}
+                <LinearGradient
+                  colors={['transparent', Colors.bg]}
+                  style={styles.bannerBottomFade}
+                />
+
+                {/* Text overlay */}
+                <View style={styles.bannerContent}>
+                  <View style={styles.bannerNumBadge}>
+                    <Text style={styles.bannerNumText}>{step.id}</Text>
+                  </View>
+                  <View style={styles.bannerTextGroup}>
+                    <Text style={styles.bannerTitle}>{step.name}</Text>
+                    <Text style={styles.bannerSub}>{meta.subtitle}</Text>
+                  </View>
+                </View>
+              </View>
 
               {/* Step content with per-step tinted background */}
               <View style={[styles.stepContent, { backgroundColor: meta.bg }]}>
@@ -960,31 +956,45 @@ const styles = StyleSheet.create({
 
   // ── Step banners ──────────────────────────────────────────────────────────
   stepBanner: {
-    height: 96,
+    height: 160,
+    width: '100%',
+    overflow: 'hidden',
+  },
+  bannerImage: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  bannerScrim: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  bannerBottomFade: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    height: 70,
+  },
+  bannerContent: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    bottom: 30,
     paddingHorizontal: Space.lg,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    overflow: 'hidden',
   },
-  bannerDecorCircle: {
-    position: 'absolute',
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  bannerDecorCircle1: { width: 130, height: 130, top: -52, right: 88 },
-  bannerDecorCircle2: { width: 88,  height: 88,  bottom: -38, right: 8 },
   bannerNumBadge: {
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: 'rgba(255,255,255,0.22)',
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.38)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)',
     alignItems: 'center', justifyContent: 'center',
   },
   bannerNumText: { fontSize: 15, fontWeight: '800', color: '#fff' },
   bannerTextGroup: { flex: 1 },
   bannerTitle: { fontSize: 17, fontWeight: '700', color: '#fff', letterSpacing: 0.2 },
-  bannerSub: { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 3, letterSpacing: 0.1 },
-  bannerBgIcon: { position: 'absolute', right: -6, top: 11 },
+  bannerSub: { fontSize: 11, color: 'rgba(255,255,255,0.78)', marginTop: 3, letterSpacing: 0.1 },
 
   stepContent: { paddingHorizontal: Space.lg, paddingTop: 16, paddingBottom: 8 },
 
