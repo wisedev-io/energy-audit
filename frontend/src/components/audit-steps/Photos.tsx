@@ -169,7 +169,7 @@ export default function Photos({ data, updateData, embedded }: any) {
     setPhotoItems(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   }, []);
 
-  const startUpload = useCallback((item: PhotoItem, originalUri: string, isPlaceholder: boolean) => {
+  const startUpload = useCallback((item: PhotoItem, uploadUri: string, isPlaceholder: boolean) => {
     const uploadUrl = caseName
       ? `${BASE_URL}/cases/${encodeURIComponent(caseName)}/photos/${item.secId}`
       : `${BASE_URL}/sessions/${encodeURIComponent(sessionId!)}/photos/${item.secId}`;
@@ -186,6 +186,10 @@ export default function Photos({ data, updateData, embedded }: any) {
 
     xhr.onload = () => {
       xhrMap.current.delete(item.id);
+      if (xhr.status < 200 || xhr.status >= 300) {
+        updateItem(item.id, { uploading: false, error: `Upload failed (${xhr.status})` });
+        return;
+      }
       try {
         const json = JSON.parse(xhr.responseText);
         if (json.slot_no !== undefined) {
@@ -219,7 +223,7 @@ export default function Photos({ data, updateData, embedded }: any) {
         item.fileName.toLowerCase().endsWith('.heic') || item.fileName.toLowerCase().endsWith('.heif');
       // HEIC: upload original file so server can convert to JPEG.
       // Non-HEIC: upload the compressed data URI result (item.uri) — smaller file, faster transfer.
-      const fetchUri = isHeicFile ? originalUri : item.uri;
+      const fetchUri = isHeicFile ? uploadUri : item.uri;
       fetch(fetchUri)
         .then(r => r.blob())
         .then(blob => {
@@ -235,7 +239,7 @@ export default function Photos({ data, updateData, embedded }: any) {
         });
     } else {
       const fd = new FormData();
-      fd.append('photo', { uri: originalUri, name: item.fileName, type: item.fileName.toLowerCase().endsWith('.heic') || item.fileName.toLowerCase().endsWith('.heif') ? 'image/heic' : 'image/jpeg' } as any);
+      fd.append('photo', { uri: uploadUri, name: item.fileName, type: item.fileName.toLowerCase().endsWith('.heic') || item.fileName.toLowerCase().endsWith('.heif') ? 'image/heic' : 'image/jpeg' } as any);
       xhr.send(fd);
     }
   }, [caseName, sessionId, updateItem]);
@@ -264,7 +268,7 @@ export default function Photos({ data, updateData, embedded }: any) {
 
     // Start each upload immediately — no queue, no delay
     newItems.forEach((item, i) => {
-      startUpload(item, assets[i].uri, compressed[i].isPlaceholder);
+      startUpload(item, compressed[i].uri, compressed[i].isPlaceholder);
     });
   };
 
@@ -275,7 +279,7 @@ export default function Photos({ data, updateData, embedded }: any) {
     const c = await compressPhoto({ uri: item.uri, fileName: item.fileName });
     const refreshed = { ...item, uploading: true, progress: 0, error: undefined };
     setPhotoItems(prev => prev.map(p => p.id === item.id ? refreshed : p));
-    startUpload(refreshed, item.uri, c.isPlaceholder);
+    startUpload(refreshed, c.uri, c.isPlaceholder);
   };
 
   const removePhoto = async (item: PhotoItem) => {
