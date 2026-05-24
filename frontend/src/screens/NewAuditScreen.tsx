@@ -390,6 +390,32 @@ export default function NewAuditScreen({ navigation, route }: any) {
         }
       });
 
+      const SECTION_SEC_ID: Record<string, number> = {
+        exterior: 1,
+        windows: 2,
+        floorplan: 3,
+        heating: 4,
+        cooling: 5,
+        appliances: 6,
+        bills: 7,
+        temphum: 8,
+        lux: 9,
+        thermal: 10,
+      };
+      const photoItems = formData.photoItems;
+      if (photoItems && typeof photoItems === 'object') {
+        Object.entries(photoItems).forEach(([sectionKey, items]) => {
+          const secId = SECTION_SEC_ID[sectionKey];
+          if (!secId || !Array.isArray(items)) return;
+          items.forEach((item: any, index: number) => {
+            const key = item?.serverKey || item?.key || item?.slotNo;
+            if (key) {
+              fd.append(`photo_key_s${secId}_${index + 1}`, String(key));
+            }
+          });
+        });
+      }
+
       setSubmitProgress('Preparing energy data…');
       [2023, 2024, 2025].forEach(yr => {
         const yData: any = formData[`y${yr}`];

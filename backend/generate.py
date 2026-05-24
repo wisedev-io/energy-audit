@@ -1243,7 +1243,8 @@ def generate_word_report(variables, energy, chart_paths,
     # Fill U-value compliance column (Table 22)
     _fill_u_table(doc, variables, form_data or {})
 
-    # Insert section photos via {{photo_N}} placeholders in template cells
+    # Insert section photos into table templates first, then fallback placeholders.
+    _insert_all_photos(doc, photo_paths_by_sec, photo_widths)
     _insert_photos_by_placeholder(doc, photo_paths_by_sec, photo_widths)
 
     # Insert auto-generated charts
